@@ -1,43 +1,54 @@
-"""Validate the published ARCH-COMP ONNX: Vehicle `safe` + immrax CROWN cross-check."""
+"""`acc validate <arm>`: Vehicle `safe` per state + immrax CROWN cross-check."""
 
 from pathlib import Path
+from typing import Callable
 
 import typer
 from rich.console import Console
-
+from torch import nn
 from vehicle_lang.loss import pytorch as loss_pt
 
 from acc import constants as C
-from acc.cli import app
-from acc.controller import published_controller
+from acc.cli import validate_app
+from acc.controller import fresh_controller, load_checkpoint, published_controller
 from acc.initial_set import centre_point, corner_points
 from acc.io import dump_trajectories_csv
 from acc.presenters import render_property_check_table, render_verifier_table
 from acc.vehicle_check import load_property_checks, load_trajectory
 from acc.verifier import verify_initial_box_invariants
 
+_LOADERS: dict[str, Callable[[], nn.Module]] = {
+    "published": lambda: published_controller(C.PUBLISHED_ONNX),
+    "stl": lambda: _load_checkpoint(C.STL_CHECKPOINT_PATH),
+    "sfo": lambda: _load_checkpoint(C.SFO_CHECKPOINT_PATH),
+}
 
-@app.command(name="validate-published")
-def validate_published(
-    onnx_path: Path = typer.Option(
-        C.PUBLISHED_ONNX, help="Path to controller_5_20.onnx"
-    ),
-    csv_out: Path = typer.Option(C.RESULTS_DIR / "published.csv", help="Per-step CSV"),
-    logic: str = typer.Option(
-        C.DIFFERENTIABLE_LOGIC.name, help="DL: vehicle | dl2 | stl"
-    ),
+
+def _load_checkpoint(path: Path) -> nn.Module:
+    net = fresh_controller()
+    net.load_state_dict(load_checkpoint(path))
+    return net
+
+
+def validate_arm(
+    arm: str,
+    csv_out: Path,
+    logic: str,
 ) -> None:
-    """Cross-check the published ONNX's safety: Vehicle `safe` per state + immrax box."""
+    """Run Vehicle `safe` + immrax CROWN on the given arm's controller."""
     console = Console()
-    logic_enum = C.parse_logic(logic)
+    if arm not in _LOADERS:
+        raise typer.BadParameter(
+            f"unknown arm '{arm}'; pick from {list(_LOADERS)}"
+        )
 
-    net = published_controller(onnx_path)
+    net = _LOADERS[arm]()
     net.eval()
 
-    console.log(f"Loading Vehicle spec (logic={logic_enum.name})...")
+    console.log(f"Loading Vehicle spec (logic={logic})...")
     declarations = loss_pt.load_specification(
         C.ACC_SPEC_PATH,
-        logic=logic_enum,
+        logic=C.to_logic(logic),
         declarations=("safe", "trajectory"),
     )
     checks = load_property_checks(declarations, names=("safe",))
@@ -65,7 +76,8 @@ def validate_published(
     rows = [(label, safe_check(net, x0)) for label, x0 in inits]
 
     render_property_check_table(
-        console, rows, title="Vehicle-compiled `safe` per initial state"
+        console, rows,
+        title=f"Vehicle-compiled `safe` per initial state ({arm})",
     )
     if verifier_results:
         render_verifier_table(console, verifier_results)
@@ -73,7 +85,6 @@ def validate_published(
     dump_trajectories_csv(csv_out, rollout, net, inits)
     console.log(f"Wrote per-step CSV to {csv_out}")
 
-    # Exit code gated on `safe` only.
     if not all(check.passes for _, check in rows):
         offenders = [label for label, check in rows if not check.passes]
         raise typer.Exit(code=1) from AssertionError(
@@ -85,3 +96,27 @@ def validate_published(
         console.log(
             "[yellow]Vehicle and immrax disagree at the set level; review the verifier note.[/yellow]"
         )
+
+
+def _make_command(arm: str, doc: str):
+    default_csv = C.RESULTS_DIR / f"{arm}.csv"
+
+    def cmd(
+        csv_out: Path = typer.Option(default_csv, help="Per-step CSV"),
+        logic: str = typer.Option(C.DEFAULT_LOGIC_NAME, help=C.LOGIC_OPTION_HELP),
+    ) -> None:
+        validate_arm(arm, csv_out, logic)
+
+    cmd.__doc__ = doc
+    return cmd
+
+
+validate_app.command(name="published")(
+    _make_command("published", "Validate the published ARCH-COMP ONNX baseline.")
+)
+validate_app.command(name="stl")(
+    _make_command("stl", "Validate the STL-trained controller checkpoint.")
+)
+validate_app.command(name="sfo")(
+    _make_command("sfo", "Validate the SFO-trained controller checkpoint.")
+)

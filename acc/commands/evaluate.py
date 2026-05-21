@@ -1,4 +1,4 @@
-"""Evaluate a trained or published controller; write per-property metrics JSON."""
+"""`acc evaluate <arm>`: per-property evaluation; writes `{arm}_metrics.json`."""
 
 from pathlib import Path
 from typing import Optional
@@ -9,16 +9,14 @@ from torch import nn
 from vehicle_lang.typing import Target
 
 from acc import constants as C
-from acc.cli import app
+from acc.cli import evaluate_app
 from acc.controller import fresh_controller, load_checkpoint, published_controller
 from acc.eval import EvalResult, evaluate
 from acc.io import dump_eval_metrics_json
 from acc.presenters import render_eval_summary
 
-
 _CHECKPOINTS = {
     "published": ("Published ONNX", "onnx"),
-    "baseline": ("BC baseline", C.BC_CHECKPOINT_PATH),
     "stl": ("STL fine-tune", C.STL_CHECKPOINT_PATH),
     "sfo": ("SFO fine-tune", C.SFO_CHECKPOINT_PATH),
 }
@@ -56,17 +54,23 @@ def evaluate_core(
     return result
 
 
-@app.command(name="evaluate")
-def evaluate_command(
-    which: str = typer.Argument(..., help="published | baseline | stl | sfo"),
-    out_dir: Path = typer.Option(C.RESULTS_DIR),
-    logic: str = typer.Option(
-        C.DIFFERENTIABLE_LOGIC.name, help="DL: vehicle | dl2 | stl"
-    ),
-) -> None:
-    """Run the per-property evaluation suite (centre + corners + PGD + CROWN)."""
-    if which not in _CHECKPOINTS:
-        raise typer.BadParameter(
-            f"unknown which '{which}'; pick from {list(_CHECKPOINTS)}"
-        )
-    evaluate_core(which=which, out_dir=out_dir, logic=C.parse_logic(logic))
+def _make_command(which: str, doc: str):
+    def cmd(
+        out_dir: Path = typer.Option(C.RESULTS_DIR),
+        logic: str = typer.Option(C.DEFAULT_LOGIC_NAME, help=C.LOGIC_OPTION_HELP),
+    ) -> None:
+        evaluate_core(which=which, out_dir=out_dir, logic=C.to_logic(logic))
+
+    cmd.__doc__ = doc
+    return cmd
+
+
+evaluate_app.command(name="published")(
+    _make_command("published", "Evaluate the published ARCH-COMP ONNX baseline.")
+)
+evaluate_app.command(name="stl")(
+    _make_command("stl", "Evaluate the STL-trained controller checkpoint.")
+)
+evaluate_app.command(name="sfo")(
+    _make_command("sfo", "Evaluate the SFO-trained controller checkpoint.")
+)

@@ -1,33 +1,13 @@
-"""Controller MLPs (obs -> action) plus the state -> observation projection.
-
-The projection is applied at the rollout boundary, not inside the
-controller (mirrors `controllerOnState` in the spec), so it is not
-double-applied when the controller is handed to Vehicle's compiled loss.
-"""
+"""Controller MLPs (obs -> action)."""
 
 from pathlib import Path
 
-from jaxtyping import Float
 import onnx
 import requests
 import torch
 from torch import Tensor, nn
 
 from acc import constants as C
-
-
-def state_to_observation(
-    state: Float[Tensor, "B 6"],
-) -> Float[Tensor, "B 5"]:
-    v_set = torch.full_like(state[..., :1], C.V_SET)
-    t_gap = torch.full_like(state[..., :1], C.T_GAP)
-    v_ego = state[..., C.IDX_V_EGO : C.IDX_V_EGO + 1]
-    d_rel = (
-        state[..., C.IDX_X_LEAD : C.IDX_X_LEAD + 1]
-        - state[..., C.IDX_X_EGO : C.IDX_X_EGO + 1]
-    )
-    v_rel = state[..., C.IDX_V_LEAD : C.IDX_V_LEAD + 1] - v_ego
-    return torch.cat([v_set, t_gap, v_ego, d_rel, v_rel], dim=-1)
 
 
 def _build_mlp() -> nn.Sequential:

@@ -1,20 +1,15 @@
-"""Optuna glue for hyperparameter tuning of the BC / STL / SFO pipelines."""
+"""Optuna glue for hyperparameter tuning of the STL / SFO pipelines."""
 
+import os
 from pathlib import Path
 from typing import Any, Callable
 
 import optuna
 import optunahub
+import torch
 from optuna.pruners import MedianPruner
 from rich.console import Console
 from rich.table import Table
-
-
-def suggest_bc_params(trial: optuna.Trial) -> dict[str, Any]:
-    return {
-        "lr": trial.suggest_float("lr", 1e-5, 1e-2, log=True),
-        "batch_size": trial.suggest_categorical("batch_size", [64, 128, 256, 512]),
-    }
 
 
 def suggest_stl_params(trial: optuna.Trial) -> dict[str, Any]:
@@ -46,6 +41,53 @@ def _auto_sampler() -> optuna.samplers.BaseSampler:
     return module.AutoSampler()
 
 
+_PER_TRIAL_RSS_GB = 4.0
+_BASE_RSS_GB = 1.0
+_MEM_SAFETY = 0.75
+_MAX_USEFUL_N_JOBS = 6
+
+
+def _physical_cores() -> int:
+    """Physical core count (not HT siblings); falls back to logical."""
+    try:
+        seen: set[tuple[str, str]] = set()
+        phys = core = ""
+        with open("/proc/cpuinfo") as fh:
+            for ln in fh:
+                if ln.startswith("physical id"):
+                    phys = ln.split(":")[1].strip()
+                elif ln.startswith("core id"):
+                    core = ln.split(":")[1].strip()
+                elif ln.strip() == "":
+                    if phys and core:
+                        seen.add((phys, core))
+                    phys = core = ""
+        if seen:
+            return len(seen)
+    except OSError:
+        pass
+    return os.cpu_count() or 1
+
+
+def _mem_available_gb() -> float:
+    try:
+        with open("/proc/meminfo") as fh:
+            for ln in fh:
+                if ln.startswith("MemAvailable:"):
+                    return int(ln.split()[1]) / (1024 * 1024)
+    except OSError:
+        pass
+    return 0.0
+
+
+def recommended_n_jobs() -> int:
+    """Min of physical cores, RAM budget, and the throughput knee."""
+    mem_cap = int(
+        (_mem_available_gb() * _MEM_SAFETY - _BASE_RSS_GB) / _PER_TRIAL_RSS_GB
+    )
+    return max(1, min(_physical_cores(), mem_cap, _MAX_USEFUL_N_JOBS))
+
+
 def run_study(
     *,
     study_name: str,
@@ -53,7 +95,13 @@ def run_study(
     objective: Callable[[optuna.Trial], float],
     n_trials: int,
     direction: str,
+    n_jobs: int = 1,
 ) -> optuna.Study:
+    """`n_jobs>1` runs trials in a thread pool. Compile-safe via `acc._vlang`."""
+    if n_jobs > 1:
+        # One torch thread per trial: parallelism is across trials.
+        torch.set_num_threads(1)
+
     storage_path.parent.mkdir(parents=True, exist_ok=True)
     storage = f"sqlite:///{storage_path}"
     study = optuna.create_study(
@@ -66,7 +114,7 @@ def run_study(
     )
 
     pruned_handler = (optuna.exceptions.TrialPruned,)
-    study.optimize(objective, n_trials=n_trials, catch=pruned_handler)
+    study.optimize(objective, n_trials=n_trials, n_jobs=n_jobs, catch=pruned_handler)
     return study
 
 

@@ -9,11 +9,12 @@ from rich.console import Console
 from vehicle_lang.typing import Target
 
 from acc import constants as C
-from acc.cli import app
+from acc.cli import tune_app
 from acc.commands.train_sfo import train_sfo_loop
 from acc.tune import (
     make_pruning_callback,
     print_best_trial,
+    recommended_n_jobs,
     require_completed_trial,
     run_study,
     suggest_sfo_params,
@@ -32,6 +33,7 @@ def tune_sfo_core(
     logic: Target = C.DIFFERENTIABLE_LOGIC,
     max_pgd_steps: Optional[int] = None,
     console: Optional[Console] = None,
+    n_jobs: int = 1,
 ) -> optuna.Study:
     """Search SFO hyperparameters with Optuna; re-train at the best params.
 
@@ -42,6 +44,9 @@ def tune_sfo_core(
     second-order GradNorm graph in memory. `None` = the real search space.
     """
     console = console or Console()
+    if n_jobs <= 0:
+        n_jobs = recommended_n_jobs()
+        console.log(f"Optuna concurrency: n_jobs={n_jobs} (memory-bounded auto)")
     trial_dir = storage.parent / "sfo_trials"
     trial_dir.mkdir(parents=True, exist_ok=True)
 
@@ -69,6 +74,7 @@ def tune_sfo_core(
         objective=objective,
         n_trials=n_trials,
         direction="minimize",
+        n_jobs=n_jobs,
     )
 
     require_completed_trial(study)
@@ -93,7 +99,7 @@ def tune_sfo_core(
     return study
 
 
-@app.command(name="tune-sfo")
+@tune_app.command(name="sfo")
 def tune_sfo(
     n_trials: int = typer.Option(C.OPTUNA_N_TRIALS),
     storage: Path = typer.Option(C.OPTUNA_STORAGE_DIR / "sfo.db"),
@@ -102,11 +108,12 @@ def tune_sfo(
     epochs: int = typer.Option(C.SFO_EPOCHS),
     steps_per_epoch: int = typer.Option(C.SFO_STEPS_PER_EPOCH),
     history_path: Path = typer.Option(C.RESULTS_DIR / "sfo_history.csv"),
-    logic: str = typer.Option(
-        C.DIFFERENTIABLE_LOGIC.name, help="DL: vehicle | dl2 | stl | qll"
-    ),
+    logic: str = typer.Option(C.DEFAULT_LOGIC_NAME, help=C.LOGIC_OPTION_HELP),
     max_pgd_steps: Optional[int] = typer.Option(
         None, help="Clamp applied PGD steps (smoke/memory-bounded runs)"
+    ),
+    n_jobs: int = typer.Option(
+        0, help="Concurrent Optuna trials (threads); 0 = memory-bounded auto"
     ),
 ) -> None:
     """Search SFO hyperparameters with Optuna; minimise final-epoch loss."""
@@ -118,6 +125,7 @@ def tune_sfo(
         epochs=epochs,
         steps_per_epoch=steps_per_epoch,
         history_path=history_path,
-        logic=C.resolve_logic(logic),
+        logic=C.to_logic(logic),
         max_pgd_steps=max_pgd_steps,
+        n_jobs=n_jobs,
     )

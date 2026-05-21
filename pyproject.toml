@@ -31,7 +31,6 @@ version = "0.1.0"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]
-mpc = ["casadi>=3.6"]
 
 [project.scripts]
 acc = "acc.cli:main"
@@ -47,3 +46,11 @@ ignore = ["F722"]
 
 [tool.uv.sources]
 vehicle-lang = {editable = true, path = "../vehicle/vehicle-python"}
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.9.4",
+    "pandas>=3.0.3",
+    "seaborn>=0.13.2",
+    "tqdm>=4.67.3",
+]

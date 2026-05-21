@@ -43,7 +43,8 @@ InvariantPredicate: TypeAlias = Callable[[np.ndarray, np.ndarray], tuple[bool, s
 
 def _safety_predicate(lower: np.ndarray, upper: np.ndarray) -> tuple[bool, str]:
     d_rel_lower = float(lower[C.IDX_X_LEAD] - upper[C.IDX_X_EGO])
-    d_safe_upper = float(C.D_DEFAULT + C.T_GAP * upper[C.IDX_V_EGO])
+    v_ego_upper_floor = max(float(upper[C.IDX_V_EGO]), 0.0)
+    d_safe_upper = C.D_DEFAULT + C.T_GAP * v_ego_upper_floor
     if d_rel_lower < d_safe_upper:
         return False, (
             f"d_rel lower = {d_rel_lower:+.4f}, d_safe upper = {d_safe_upper:+.4f}"
@@ -132,13 +133,16 @@ class _ACCController(immrax.Control):
 
 
 def _acc_dynamics_step_jax(state: jax.Array, action: jax.Array) -> jax.Array:
-    # JAX mirror of acc.dynamics.acc_dynamics_step; equivalence is cross-checked
-    # by tests/test_plant_consistency.py.
+    # JAX mirror of acc.dynamics._acc_dynamics_step_impl; equivalence is
+    # enforced by tests/test_jax_matches_pytorch.py.
     v_lead = state[C.IDX_V_LEAD]
     g_lead = state[C.IDX_G_LEAD]
     v_ego = state[C.IDX_V_EGO]
     g_ego = state[C.IDX_G_EGO]
-    a_ego = action[0]
+
+    centre = 0.5 * (C.ACT_HI + C.ACT_LO)
+    half = 0.5 * (C.ACT_HI - C.ACT_LO)
+    a_ego = centre + half * jnp.tanh((action[0] - centre) / half)
 
     a_lead = C.A_LEAD_HARD * jax.nn.sigmoid(C.K_LEAD * (v_lead - C.V_LEAD_RELEASE))
 
@@ -151,7 +155,13 @@ def _acc_dynamics_step_jax(state: jax.Array, action: jax.Array) -> jax.Array:
     dg_ego = (a_ego - g_ego) / C.TAU - C.MU * v_ego * v_ego
 
     deriv = jnp.stack([dx_lead, dv_lead, dg_lead, dx_ego, dv_ego, dg_ego])
-    return state + C.DT * deriv
+    nxt = state + C.DT * deriv
+    return (
+        nxt.at[C.IDX_V_LEAD]
+        .set(jnp.maximum(nxt[C.IDX_V_LEAD], 0.0))
+        .at[C.IDX_V_EGO]
+        .set(jnp.maximum(nxt[C.IDX_V_EGO], 0.0))
+    )
 
 
 class _ACCOpenLoop(immrax.OpenLoopSystem):

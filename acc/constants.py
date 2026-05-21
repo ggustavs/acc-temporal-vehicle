@@ -36,28 +36,16 @@ N_STEPS = 50
 # Initial-state set (centre point implied by midpoint of these)
 INITIAL_LO = np.array([85.0, 32.0, 0.0, 10.0, 30.0, 0.0])
 INITIAL_HI = np.array([89.0, 32.2, 0.0, 11.0, 30.2, 0.0])
-MPC_ENLARGE_FACTOR = 1.2
 
 # Action bounds
 ACT_LO = -3.0
 ACT_HI = 2.0
 
-# MPC oracle
-MPC_HORIZON = 20
-MPC_N_TRAJECTORIES = 500
-MPC_COST_W_SPEED = 1.0
-MPC_COST_W_ACT = 0.1
-MPC_COST_W_RATE = 0.1
-MPC_COST_W_SLACK = 1000.0
-MPC_CHECKPOINT_EVERY = 25
-
-# BC training
-BC_EPOCHS = 50
-BC_BATCH_SIZE = 256
-BC_LR = 1e-3
-BC_VAL_FRACTION = 0.1
+# Controller MLP
 HIDDEN_LAYERS = 5
 HIDDEN_WIDTH = 20
+
+SATISFICE_BETA = 1.0
 
 # STL fine-tune
 STL_EPOCHS = 5
@@ -66,10 +54,10 @@ STL_LR = 1e-4
 STL_BATCH_INITS = 8
 
 # SFO fine-tune
-SFO_EPOCHS = 20
+SFO_EPOCHS = 10
 SFO_STEPS_PER_EPOCH = 20
 SFO_LR = 1e-4
-SFO_PGD_RESTARTS = 4
+SFO_PGD_RESTARTS = 32
 SFO_PGD_K = 10
 SFO_PGD_ETA = 0.5
 COMFORT_MAX = 2.0
@@ -81,8 +69,9 @@ PROPERTY_NAMES: tuple[str, ...] = (
     "respondsToBrake",
     "stabilizes",
     "cruiseUntilFollow",
+    "tracksSetSpeed",
 )
-# CROWN box-invariant subset; the temporal properties are loss-only.
+# Box-invariant subset (only these are verifier-eligible).
 INVARIANT_PROPERTY_NAMES: tuple[str, ...] = (
     "safe",
     "comfortable",
@@ -93,53 +82,35 @@ SFO_PROPERTY_NAMES: tuple[str, ...] = (
     "sfoRespondsToBrake",
     "sfoStabilizes",
     "sfoCruiseUntilFollow",
+    "sfoTracksSetSpeed",
 )
 
 # Eval-time PGD: one-shot per property, so heavier than training.
 EVAL_PGD_K = 50
 EVAL_PGD_RESTARTS = 8
 
-# DL2 default: STL's reduceMin/reduceMax kill gradient once any sample
-# fully satisfies the property; DL2's additive aggregation doesn't.
-DIFFERENTIABLE_LOGIC: DifferentiableLogic = DifferentiableLogic.DL2
+# Names outside this dict resolve to a CustomLogic defined in the .vcl.
+_BUILTIN_LOGICS = {
+    "VehicleLoss": DifferentiableLogic.Vehicle,
+    "DL2Loss": DifferentiableLogic.DL2,
+    "STLLoss": DifferentiableLogic.STL,
+}
 
 
-def parse_logic(name: str) -> DifferentiableLogic:
-    """`--logic stl/dl2/vehicle` (case-insensitive) -> enum value."""
-    try:
-        return DifferentiableLogic[name]
-    except KeyError:
-        match = {m.name.lower(): m for m in DifferentiableLogic}.get(name.lower())
-        if match is None:
-            choices = ", ".join(m.name for m in DifferentiableLogic)
-            raise ValueError(f"unknown logic {name!r}; pick from {choices}")
-        return match
+def to_logic(name: str) -> Target:
+    """Builtin logic for VehicleLoss/DL2Loss/STLLoss; any other name -> CustomLogic."""
+    return _BUILTIN_LOGICS.get(name, CustomLogic(name))
 
 
-# The QLL custom differentiable logic is defined in the .vcl specs as the
-# `QLLLoss` record; it is selected by name rather than the builtin enum.
-QLL_LOGIC_NAME = "QLLLoss"
+LOGIC_OPTION_HELP = "Vehicle logic: VehicleLoss | DL2Loss | STLLoss, or a custom logic name"
 
-
-def resolve_logic(name: str) -> Target:
-    """Like `parse_logic` but also resolves `qll`/`qllloss` to the custom
-    `QLLLoss` logic declared in the specs."""
-    if name.lower() in ("qll", "qllloss"):
-        return CustomLogic(QLL_LOGIC_NAME)
-    return parse_logic(name)
-
-
-def logic_label(logic: Target) -> str:
-    """Display name for either a `DifferentiableLogic` enum or a
-    `CustomLogic` (which has no `.name`)."""
-    return getattr(logic, "name", None) or getattr(logic, "_name", None) or str(logic)
-
+DEFAULT_LOGIC_NAME = "QLLLoss"
+DIFFERENTIABLE_LOGIC: Target = to_logic(DEFAULT_LOGIC_NAME)
 
 # Reproducibility
 SEED = 0
 
-# Optuna hyperparameter search
-OPTUNA_N_TRIALS = 30
+OPTUNA_N_TRIALS = 15
 
 # Paths (relative to project root)
 _ROOT = Path(__file__).resolve().parent.parent
@@ -153,8 +124,6 @@ PUBLISHED_ONNX_URL = (
     "https://raw.githubusercontent.com/verivital/ARCH-COMP2025"
     "/main/benchmarks/ACC/controller_5_20.onnx"
 )
-MPC_DATA_PATH = DATA_DIR / "mpc_dataset.npz"
-BC_CHECKPOINT_PATH = CHECKPOINTS_DIR / "bc_baseline.pt"
 STL_CHECKPOINT_PATH = CHECKPOINTS_DIR / "stl_trained.pt"
 SFO_CHECKPOINT_PATH = CHECKPOINTS_DIR / "sfo_trained.pt"
 ACC_SPEC_PATH = SPECS_DIR / "acc_safety.vcl"

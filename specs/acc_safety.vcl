@@ -88,6 +88,11 @@ epsV = 0.5
 epsVGlobal : Real
 epsVGlobal = 2.0
 
+-- Progress tolerance: ego must not crawl below vAch = min(vSet, vLead)
+-- by more than this. Without it, brake-and-crawl satisfies safe+comfort.
+epsTrack : Real
+epsTrack = 2.0
+
 @network
 controller : Tensor Real [obsDim] -> Tensor Real [actDim]
 
@@ -114,7 +119,7 @@ safe = (globally [0, T - 1] (
           let xEgo  = transpose trajectory ! 3 in
           let vEgo  = transpose trajectory ! 4 in
           let dRel  = xLead - xEgo in
-          let dSafe = const dDefault [T] + const tGap [T] * vEgo in
+          let dSafe = const dDefault [T] + const tGap [T] * (max vEgo (const 0.0 [T])) in
           dRel >=. dSafe)) ! 0
 
 @property
@@ -131,7 +136,7 @@ respondsToBrake = (globally [0, T - 6] (
                      let vEgo  = transpose trajectory ! 4 in
                      let vLead = transpose trajectory ! 1 in
                      let dRel  = xLead - xEgo in
-                     let dSafe = const dDefault [T] + const tGap [T] * vEgo in
+                     let dSafe = const dDefault [T] + const tGap [T] * (max vEgo (const 0.0 [T])) in
                      implies (dRel <=. dSafe + const dDefault [T])
                              (finally [0, 5] (vEgo <=. vLead + const epsVGlobal [T])))) ! 0
 
@@ -144,7 +149,7 @@ stabilizes = (finally [0, T - 6] (
                   let vEgo  = transpose trajectory ! 4 in
                   let vLead = transpose trajectory ! 1 in
                   let dRel  = xLead - xEgo in
-                  let dSafe = const dDefault [T] + const tGap [T] * vEgo in
+                  let dSafe = const dDefault [T] + const tGap [T] * (max vEgo (const 0.0 [T])) in
                   dRel >=. dSafe and vEgo <=. vLead + const epsVGlobal [T]))) ! 0
 
 @property
@@ -154,9 +159,18 @@ cruiseUntilFollow = (until [0, T - 1]
                         let xEgo  = transpose trajectory ! 3 in
                         let vEgo  = transpose trajectory ! 4 in
                         let dRel  = xLead - xEgo in
-                        let dSafe = const dDefault [T] + const tGap [T] * vEgo in
+                        let dSafe = const dDefault [T] + const tGap [T] * (max vEgo (const 0.0 [T])) in
                         dRel >=. dSafe)
                        (globally [0, 5] (
                           let vEgo  = transpose trajectory ! 4 in
                           let vLead = transpose trajectory ! 1 in
                           vEgo <=. vLead + const epsVGlobal [T]))) ! 0
+
+@property
+tracksSetSpeed : Bool
+tracksSetSpeed = (finally [0, T - 6] (
+                    globally [0, 5] (
+                      let vEgo  = transpose trajectory ! 4 in
+                      let vLead = transpose trajectory ! 1 in
+                      let vAch  = min (const vSet [T]) vLead in
+                      vEgo >=. vAch - const epsTrack [T]))) ! 0

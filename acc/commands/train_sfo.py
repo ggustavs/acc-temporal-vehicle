@@ -8,13 +8,14 @@ import typer
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from vehicle_lang.loss import pytorch as loss_pt
-from vehicle_lang.loss.pytorch import GradNormBalancer
 from vehicle_lang.typing import Target
 
 from acc import constants as C
-from acc.cli import app
+from acc._vlang import load_specification
+from acc.cli import train_app
 from acc.controller import fresh_controller
 from acc.dynamics import acc_dynamics_step
+from acc.gradnorm import GuardedGradNormBalancer as GradNormBalancer
 from acc.io import dump_sfo_history_csv
 from acc.presenters import render_sfo_summary
 
@@ -38,24 +39,33 @@ def train_sfo_loop(
 
     torch.manual_seed(C.SEED)
 
-    sampler = loss_pt.DefaultPyTorchSampler(num_steps=pgd_num_steps)
-    loss_dict = loss_pt.load_specification(
+    sampler = loss_pt.DefaultPyTorchSampler(
+        num_samples=C.SFO_PGD_RESTARTS, num_steps=pgd_num_steps
+    )
+    loss_dict = load_specification(
         spec_path,
         logic=logic,
         samplers={"x": sampler.get_loss},
     )
     property_fns = {name: loss_dict[name] for name in C.SFO_PROPERTY_NAMES}
     console.log(
-        f"Loaded {spec_path} with logic {C.logic_label(logic)} "
+        f"Loaded {spec_path} with logic {logic} "
         f"(properties: {', '.join(C.SFO_PROPERTY_NAMES)})"
     )
 
     net = fresh_controller()
     optim = torch.optim.Adam(net.parameters(), lr=lr)
 
+    def _sat(v: torch.Tensor) -> torch.Tensor:
+        return torch.nn.functional.softplus(v, beta=C.SATISFICE_BETA)
+
     balancer = GradNormBalancer(
         losses={
-            name: (lambda fn=fn: fn(controller=net, dynamics=acc_dynamics_step))
+            name: (
+                lambda fn=fn: _sat(
+                    fn(controller=net, dynamics=acc_dynamics_step)
+                )
+            )
             for name, fn in property_fns.items()
         },
         model=net,
@@ -100,7 +110,7 @@ def train_sfo_loop(
     return history[-1][1]
 
 
-@app.command(name="train-sfo")
+@train_app.command(name="sfo")
 def train_sfo(
     spec_path: Path = typer.Option(C.ACC_SFO_SPEC_PATH),
     out_path: Path = typer.Option(C.SFO_CHECKPOINT_PATH),
@@ -108,13 +118,11 @@ def train_sfo(
     steps_per_epoch: int = typer.Option(C.SFO_STEPS_PER_EPOCH),
     lr: float = typer.Option(C.SFO_LR),
     history_path: Path = typer.Option(C.RESULTS_DIR / "sfo_history.csv"),
-    logic: str = typer.Option(
-        C.DIFFERENTIABLE_LOGIC.name, help="DL: vehicle | dl2 | stl"
-    ),
+    logic: str = typer.Option(C.DEFAULT_LOGIC_NAME, help=C.LOGIC_OPTION_HELP),
 ) -> None:
     """Train from random init using only the Vehicle SFO property loss."""
     train_sfo_loop(
-        logic=C.parse_logic(logic),
+        logic=C.to_logic(logic),
         spec_path=spec_path,
         out_path=out_path,
         epochs=epochs,

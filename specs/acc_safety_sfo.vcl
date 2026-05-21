@@ -88,6 +88,9 @@ epsV = 0.5
 epsVGlobal : Real
 epsVGlobal = 2.0
 
+epsTrack : Real
+epsTrack = 2.0
+
 @network
 controller : Tensor Real [obsDim] -> Tensor Real [actDim]
 
@@ -119,7 +122,7 @@ safeFrom x = (globally [0, T - 1] (
                 let xEgo  = transpose (trajectoryFrom x) ! 3 in
                 let vEgo  = transpose (trajectoryFrom x) ! 4 in
                 let dRel  = xLead - xEgo in
-                let dSafe = const dDefault [T] + const tGap [T] * vEgo in
+                let dSafe = const dDefault [T] + const tGap [T] * (max vEgo (const 0.0 [T])) in
                 dRel >=. dSafe)) ! 0
 
 comfortableFrom : Tensor Real [stateDim] -> Bool
@@ -134,7 +137,7 @@ respondsToBrakeFrom x = (globally [0, T - 6] (
                            let vEgo  = transpose (trajectoryFrom x) ! 4 in
                            let vLead = transpose (trajectoryFrom x) ! 1 in
                            let dRel  = xLead - xEgo in
-                           let dSafe = const dDefault [T] + const tGap [T] * vEgo in
+                           let dSafe = const dDefault [T] + const tGap [T] * (max vEgo (const 0.0 [T])) in
                            implies (dRel <=. dSafe + const dDefault [T])
                                    (finally [0, 5] (vEgo <=. vLead + const epsVGlobal [T])))) ! 0
 
@@ -146,7 +149,7 @@ stabilizesFrom x = (finally [0, T - 6] (
                         let vEgo  = transpose (trajectoryFrom x) ! 4 in
                         let vLead = transpose (trajectoryFrom x) ! 1 in
                         let dRel  = xLead - xEgo in
-                        let dSafe = const dDefault [T] + const tGap [T] * vEgo in
+                        let dSafe = const dDefault [T] + const tGap [T] * (max vEgo (const 0.0 [T])) in
                         dRel >=. dSafe and vEgo <=. vLead + const epsVGlobal [T]))) ! 0
 
 cruiseUntilFollowFrom : Tensor Real [stateDim] -> Bool
@@ -155,7 +158,7 @@ cruiseUntilFollowFrom x = (until [0, T - 1]
                               let xEgo  = transpose (trajectoryFrom x) ! 3 in
                               let vEgo  = transpose (trajectoryFrom x) ! 4 in
                               let dRel  = xLead - xEgo in
-                              let dSafe = const dDefault [T] + const tGap [T] * vEgo in
+                              let dSafe = const dDefault [T] + const tGap [T] * (max vEgo (const 0.0 [T])) in
                               dRel >=. dSafe)
                              (globally [0, 5] (
                                 let vEgo  = transpose (trajectoryFrom x) ! 4 in
@@ -186,3 +189,16 @@ sfoStabilizes = forall (x : Tensor Real [stateDim]) .
 sfoCruiseUntilFollow : Bool
 sfoCruiseUntilFollow = forall (x : Tensor Real [stateDim]) .
     inInitialSet x => cruiseUntilFollowFrom x
+
+tracksSetSpeedFrom : Tensor Real [stateDim] -> Bool
+tracksSetSpeedFrom x = (finally [0, T - 6] (
+                          globally [0, 5] (
+                            let vEgo  = transpose (trajectoryFrom x) ! 4 in
+                            let vLead = transpose (trajectoryFrom x) ! 1 in
+                            let vAch  = min (const vSet [T]) vLead in
+                            vEgo >=. vAch - const epsTrack [T]))) ! 0
+
+@property
+sfoTracksSetSpeed : Bool
+sfoTracksSetSpeed = forall (x : Tensor Real [stateDim]) .
+    inInitialSet x => tracksSetSpeedFrom x

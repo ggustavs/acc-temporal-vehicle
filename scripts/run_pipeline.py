@@ -1,17 +1,13 @@
 """Sequential Optuna tune-stl -> tune-sfo (-> evaluate) runner.
 
-MPC data and the BC checkpoint are assumed already present; this script
-only runs the STL and SFO Optuna searches (each re-trains at its best
-params into the main checkpoint) and then evaluates the tuned models.
-
-Full run (resumable; re-running continues the studies):
+Each Optuna stage re-trains at its best params into the main checkpoint;
+the optional evaluate stage runs `acc evaluate` per arm. Resumable via
+the SQLite study storage.
 
     nohup uv run python scripts/run_pipeline.py --profile full \
         > run.out 2>&1 &
 
-Validate locally first:
-
-    uv run python scripts/run_pipeline.py --profile smoke
+    uv run python scripts/run_pipeline.py --profile smoke   # local smoke
 """
 
 from __future__ import annotations
@@ -69,7 +65,9 @@ def _profile_params(profile: str) -> dict[str, dict[str, int]]:
     raise ValueError(f"unknown profile {profile!r}")
 
 
-def _stage_plan(profile: str, run_dir: Path) -> dict[str, dict[str, Any]]:
+def _stage_plan(
+    profile: str, run_dir: Path, n_jobs: int
+) -> dict[str, dict[str, Any]]:
     params = _profile_params(profile)
     # smoke uses an isolated study so it never touches the shared one.
     optuna_dir = (run_dir / "optuna") if profile == "smoke" else C.OPTUNA_STORAGE_DIR
@@ -85,6 +83,7 @@ def _stage_plan(profile: str, run_dir: Path) -> dict[str, dict[str, Any]]:
             # smoke clamps n_inits to fit the GradNorm graph in memory;
             # None = full {4,8,16,32}.
             "max_n_inits": 4 if profile == "smoke" else None,
+            "n_jobs": n_jobs,
         },
         "tune-sfo": {
             "n_trials": params["sfo"]["n_trials"],
@@ -97,15 +96,13 @@ def _stage_plan(profile: str, run_dir: Path) -> dict[str, dict[str, Any]]:
             # smoke clamps the PGD inner loop (the memory driver);
             # None = full {5,10,20}.
             "max_pgd_steps": 5 if profile == "smoke" else None,
+            "n_jobs": n_jobs,
         },
     }
 
 
 def _eval_targets(args: argparse.Namespace) -> list[str]:
-    targets: list[str] = []
-    if args.with_baseline:
-        targets.append("baseline")
-    targets += ["stl", "sfo"]
+    targets: list[str] = ["stl", "sfo"]
     if args.with_published:
         targets.append("published")
     return targets
@@ -114,21 +111,24 @@ def _eval_targets(args: argparse.Namespace) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=["smoke", "full"], required=True)
-    parser.add_argument(
-        "--logic", default="qll", help="vehicle | dl2 | stl | qll (default: qll)"
-    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-eval", action="store_true")
-    parser.add_argument("--with-baseline", action="store_true")
     parser.add_argument("--with-published", action="store_true")
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=0,
+        help="Concurrent Optuna trials per stage (threads; shared in-process "
+        "study, memory-frugal). 0 = memory-bounded auto.",
+    )
     args = parser.parse_args()
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = C.RESULTS_DIR / "run_logs" / ts
-    plan = _stage_plan(args.profile, run_dir)
+    plan = _stage_plan(args.profile, run_dir, args.n_jobs)
     eval_targets = [] if args.no_eval else _eval_targets(args)
-    logic = C.resolve_logic(args.logic)
-    logic_name = C.logic_label(logic)
+    logic = C.DIFFERENTIABLE_LOGIC
+    logic_name = C.DEFAULT_LOGIC_NAME
 
     if args.dry_run:
         print(f"profile={args.profile} logic={logic_name} run_dir={run_dir}")
@@ -202,9 +202,6 @@ def main() -> int:
         _save()
 
     for which in eval_targets:
-        if which == "baseline" and not C.BC_CHECKPOINT_PATH.exists():
-            print(f"[skip] evaluate {which}: {C.BC_CHECKPOINT_PATH} missing")
-            continue
         _run(
             f"evaluate-{which}",
             lambda c, w=which: evaluate_core(
