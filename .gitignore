@@ -11,8 +11,6 @@ uv.lock
 
 data/*
 !data/.gitkeep
-checkpoints/*
-!checkpoints/.gitkeep
 results/*
 !results/.gitkeep
 optuna
