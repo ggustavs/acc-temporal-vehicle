@@ -40,9 +40,7 @@ _HEATMAP_METRICS = (
 )
 
 
-def _per_cell_metrics(
-    tr: np.ndarray, v_set_per_init: np.ndarray
-) -> dict[str, float]:
+def _per_cell_metrics(tr: np.ndarray, v_set_per_init: np.ndarray) -> dict[str, float]:
     return {
         "median_min_margin": float(np.median(margins(tr).min(1))),
         "jerk_rms_median": float(np.median(jerk_rms(tr))),
@@ -55,9 +53,7 @@ def _per_cell_metrics(
     }
 
 
-def _plot_heatmaps(
-    metrics: dict, order: list[str], fig_dir: Path
-) -> None:
+def _plot_heatmaps(metrics: dict, order: list[str], fig_dir: Path) -> None:
     n_arms = len(order)
     for m in _HEATMAP_METRICS:
         fig, axes = plt.subplots(
@@ -104,8 +100,13 @@ def _plot_heatmaps(
                 for r in range(len(ACC_SWEEP_V_REL)):
                     for c in range(len(ACC_SWEEP_SLACK)):
                         ax.text(
-                            c, r, f"{grids[(arm, vs)][r, c]:.2f}",
-                            ha="center", va="center", fontsize=7, color="w",
+                            c,
+                            r,
+                            f"{grids[(arm, vs)][r, c]:.2f}",
+                            ha="center",
+                            va="center",
+                            fontsize=7,
+                            color="w",
                         )
                 if i_arm == 0:
                     ax.set_title(f"v_set={vs:g}")
@@ -158,9 +159,7 @@ def deep_eval_acc_sweep(
         metrics["acc_sweep"][cell] = {}
         for k, net in nets.items():
             tr = rollout(net, x0_c, "training", v_set=v_set_c).numpy()
-            metrics["acc_sweep"][cell][k] = _per_cell_metrics(
-                tr, v_set_c.numpy()
-            )
+            metrics["acc_sweep"][cell][k] = _per_cell_metrics(tr, v_set_c.numpy())
 
     _plot_heatmaps(metrics, order, fig_dir)
 
@@ -169,16 +168,9 @@ def deep_eval_acc_sweep(
     n_png = len(list(fig_dir.glob("*.png")))
     console.print(f"wrote {metrics_path} and {n_png} figures")
     for m in ("jerk_rms_median", "median_min_margin"):
-        vals = {
-            k: [metrics["acc_sweep"][c][k][m] for c in unique_cells]
-            for k in order
-        }
+        vals = {k: [metrics["acc_sweep"][c][k][m] for c in unique_cells] for k in order}
         for k in order:
-            spread = (
-                (max(vals[k]) - min(vals[k]))
-                / (np.mean(vals[k]) + 1e-9)
-                * 100
-            )
+            spread = (max(vals[k]) - min(vals[k])) / (np.mean(vals[k]) + 1e-9) * 100
             console.print(
                 f"  {k:10s} {m:30s} cell-spread={spread:5.1f}% "
                 f"min={min(vals[k]):.3f} max={max(vals[k]):.3f}"

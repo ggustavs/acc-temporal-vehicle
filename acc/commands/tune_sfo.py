@@ -40,8 +40,8 @@ def tune_sfo_core(
     Per-trial artifacts go next to the study DB (`storage.parent`), so an
     isolated `storage` keeps a run from polluting the shared study.
     `max_pgd_steps` clamps the applied PGD inner-loop length (the sampled
-    value is still recorded); the smoke profile uses it to fit the
-    second-order GradNorm graph in memory. `None` = the real search space.
+    value is still recorded); the smoke profile uses it to fit the PGD
+    inner loop in memory. `None` = the real search space.
     """
     console = console or Console()
     if n_jobs <= 0:

@@ -13,10 +13,10 @@ from vehicle_lang.typing import Target
 from acc import constants as C
 from acc._vlang import load_specification
 from acc.cli import train_app
-from acc.controller import fresh_controller
+from acc.controller import fresh_controller, load_checkpoint
 from acc.dynamics import acc_dynamics_step
 from acc.gradnorm import GuardedGradNormBalancer as GradNormBalancer
-from acc.initial_set import sample_uniform
+from acc.initial_set import sample_uniform, sample_uniform_box
 from acc.io import dump_stl_history_csv
 from acc.presenters import render_stl_summary
 
@@ -33,6 +33,9 @@ def train_stl_loop(
     logic: Target = C.DIFFERENTIABLE_LOGIC,
     console: Optional[Console] = None,
     report_cb: Optional[Callable[[int, float], bool]] = None,
+    warm_start_path: Optional[Path] = None,
+    init_lo: Optional[np.ndarray] = None,
+    init_hi: Optional[np.ndarray] = None,
 ) -> float:
     """`report_cb(epoch, mean_stl) -> True` aborts early."""
     console = console or Console()
@@ -48,6 +51,8 @@ def train_stl_loop(
     )
 
     net = fresh_controller()
+    if warm_start_path is not None:
+        net.load_state_dict(load_checkpoint(warm_start_path))
     optim = torch.optim.Adam(net.parameters(), lr=lr)
     rng = np.random.default_rng(C.SEED + 1)
 
@@ -94,7 +99,14 @@ def train_stl_loop(
             stl_total = 0.0
             for _ in range(steps_per_epoch):
                 step_inits.clear()
-                step_inits.extend(sample_uniform(n_inits, factor=1.0, generator=rng))
+                if init_lo is not None and init_hi is not None:
+                    step_inits.extend(
+                        sample_uniform_box(n_inits, init_lo, init_hi, generator=rng)
+                    )
+                else:
+                    step_inits.extend(
+                        sample_uniform(n_inits, factor=1.0, generator=rng)
+                    )
                 total, _per_task = balancer.step()
 
                 optim.zero_grad()
@@ -129,8 +141,25 @@ def train_stl(
     n_inits: int = typer.Option(C.STL_BATCH_INITS),
     history_path: Path = typer.Option(C.RESULTS_DIR / "stl_history.csv"),
     logic: str = typer.Option(C.DEFAULT_LOGIC_NAME, help=C.LOGIC_OPTION_HELP),
+    warm_start_path: Optional[Path] = typer.Option(
+        None, help="Warm-start from this checkpoint instead of a fresh MLP."
+    ),
+    init_mode: str = typer.Option(
+        "default",
+        help="default = INITIAL_LO/HI; finetune = INITIAL_LO_FINETUNE/HI_FINETUNE.",
+    ),
 ) -> None:
     """Train from random init using only the Vehicle STL property loss."""
+    if init_mode == "finetune":
+        init_lo: Optional[np.ndarray] = C.INITIAL_LO_FINETUNE
+        init_hi: Optional[np.ndarray] = C.INITIAL_HI_FINETUNE
+    elif init_mode == "default":
+        init_lo = None
+        init_hi = None
+    else:
+        raise typer.BadParameter(
+            f"unknown --init-mode {init_mode!r}; pick from default | finetune"
+        )
     train_stl_loop(
         spec_path=spec_path,
         out_path=out_path,
@@ -140,4 +169,7 @@ def train_stl(
         n_inits=n_inits,
         history_path=history_path,
         logic=C.to_logic(logic),
+        warm_start_path=warm_start_path,
+        init_lo=init_lo,
+        init_hi=init_hi,
     )

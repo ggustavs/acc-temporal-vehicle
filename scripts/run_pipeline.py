@@ -25,8 +25,13 @@ from rich.console import Console
 
 from acc import constants as C
 from acc.commands.evaluate import evaluate_core
+from acc.commands.train_sfo import train_sfo_loop
+from acc.commands.train_stl import train_stl_loop
 from acc.commands.tune_sfo import tune_sfo_core
 from acc.commands.tune_stl import tune_stl_core
+
+_FINETUNE_LR = 1e-5
+_FINETUNE_EPOCHS = 5
 
 
 class _Tee:
@@ -66,13 +71,18 @@ def _profile_params(profile: str) -> dict[str, dict[str, int]]:
 
 
 def _stage_plan(
-    profile: str, run_dir: Path, n_jobs: int
+    profile: str,
+    run_dir: Path,
+    n_jobs: int,
+    with_finetune: bool,
+    skip_tune: bool,
 ) -> dict[str, dict[str, Any]]:
     params = _profile_params(profile)
     # smoke uses an isolated study so it never touches the shared one.
     optuna_dir = (run_dir / "optuna") if profile == "smoke" else C.OPTUNA_STORAGE_DIR
-    return {
-        "tune-stl": {
+    plan: dict[str, dict[str, Any]] = {}
+    if not skip_tune:
+        plan["tune-stl"] = {
             "n_trials": params["stl"]["n_trials"],
             "storage": optuna_dir / "stl.db",
             "spec_path": C.ACC_SPEC_PATH,
@@ -84,8 +94,8 @@ def _stage_plan(
             # None = full {4,8,16,32}.
             "max_n_inits": 4 if profile == "smoke" else None,
             "n_jobs": n_jobs,
-        },
-        "tune-sfo": {
+        }
+        plan["tune-sfo"] = {
             "n_trials": params["sfo"]["n_trials"],
             "storage": optuna_dir / "sfo.db",
             "spec_path": C.ACC_SFO_SPEC_PATH,
@@ -97,12 +107,37 @@ def _stage_plan(
             # None = full {5,10,20}.
             "max_pgd_steps": 5 if profile == "smoke" else None,
             "n_jobs": n_jobs,
-        },
-    }
+        }
+    if with_finetune:
+        plan["finetune-stl"] = {
+            "spec_path": C.ACC_SPEC_PATH,
+            "out_path": C.STL_FINETUNED_PATH,
+            "epochs": _FINETUNE_EPOCHS,
+            "steps_per_epoch": params["stl"]["steps_per_epoch"],
+            "lr": _FINETUNE_LR,
+            "n_inits": C.STL_BATCH_INITS,
+            "history_path": C.RESULTS_DIR / "stl_finetune_history.csv",
+            "warm_start_path": C.STL_CHECKPOINT_PATH,
+            "init_lo": C.INITIAL_LO_FINETUNE,
+            "init_hi": C.INITIAL_HI_FINETUNE,
+        }
+        plan["finetune-sfo"] = {
+            "spec_path": C.ACC_SFO_FINETUNE_SPEC_PATH,
+            "out_path": C.SFO_FINETUNED_PATH,
+            "epochs": _FINETUNE_EPOCHS,
+            "steps_per_epoch": params["sfo"]["steps_per_epoch"],
+            "lr": _FINETUNE_LR,
+            "pgd_num_steps": C.SFO_PGD_K,
+            "history_path": C.RESULTS_DIR / "sfo_finetune_history.csv",
+            "warm_start_path": C.SFO_CHECKPOINT_PATH,
+        }
+    return plan
 
 
 def _eval_targets(args: argparse.Namespace) -> list[str]:
     targets: list[str] = ["stl", "sfo"]
+    if args.with_finetune:
+        targets += ["stl_finetuned", "sfo_finetuned"]
     if args.with_published:
         targets.append("published")
     return targets
@@ -115,6 +150,19 @@ def main() -> int:
     parser.add_argument("--no-eval", action="store_true")
     parser.add_argument("--with-published", action="store_true")
     parser.add_argument(
+        "--with-finetune",
+        action="store_true",
+        help="After tune-*, warm-start fine-tune both arms on the widened "
+        "init set (acc_safety_sfo_finetune.vcl + INITIAL_*_FINETUNE); "
+        "writes {stl,sfo}_finetuned.pt and evaluates them.",
+    )
+    parser.add_argument(
+        "--skip-tune",
+        action="store_true",
+        help="Omit tune-stl/tune-sfo. Use with --with-finetune to fine-tune "
+        "the committed {stl,sfo}_trained.pt without re-running Optuna.",
+    )
+    parser.add_argument(
         "--n-jobs",
         type=int,
         default=0,
@@ -125,7 +173,22 @@ def main() -> int:
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = C.RESULTS_DIR / "run_logs" / ts
-    plan = _stage_plan(args.profile, run_dir, args.n_jobs)
+    if args.skip_tune and args.with_finetune:
+        missing = [
+            str(p)
+            for p in (C.STL_CHECKPOINT_PATH, C.SFO_CHECKPOINT_PATH)
+            if not p.exists()
+        ]
+        if missing:
+            print(
+                f"--skip-tune --with-finetune needs the trained checkpoints to "
+                f"warm-start from; missing: {missing}",
+                file=sys.stderr,
+            )
+            return 1
+    plan = _stage_plan(
+        args.profile, run_dir, args.n_jobs, args.with_finetune, args.skip_tune
+    )
     eval_targets = [] if args.no_eval else _eval_targets(args)
     logic = C.DIFFERENTIABLE_LOGIC
     logic_name = C.DEFAULT_LOGIC_NAME
@@ -182,7 +245,8 @@ def main() -> int:
         return result
 
     tune_cores = {"tune-stl": tune_stl_core, "tune-sfo": tune_sfo_core}
-    for name in ("tune-stl", "tune-sfo"):
+    tune_names: tuple[str, ...] = () if args.skip_tune else ("tune-stl", "tune-sfo")
+    for name in tune_names:
         kwargs = plan[name]
         study = _run(
             name,
@@ -200,6 +264,28 @@ def main() -> int:
             "history": str(kwargs["history_path"]),
         }
         _save()
+
+    if args.with_finetune:
+        finetune_loops = {
+            "finetune-stl": train_stl_loop,
+            "finetune-sfo": train_sfo_loop,
+        }
+        for name in ("finetune-stl", "finetune-sfo"):
+            kwargs = plan[name]
+            final_loss = _run(
+                name,
+                lambda c, k=kwargs, fn=finetune_loops[name]: fn(
+                    console=c, logic=logic, **k
+                ),
+            )
+            st = manifest["stages"][-1]
+            st["final_loss"] = final_loss
+            st["warm_start_from"] = str(kwargs["warm_start_path"])
+            st["artifacts"] = {
+                "checkpoint": str(kwargs["out_path"]),
+                "history": str(kwargs["history_path"]),
+            }
+            _save()
 
     for which in eval_targets:
         _run(

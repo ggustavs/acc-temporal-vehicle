@@ -44,3 +44,18 @@ def sample_uniform(
     raw[:, C.IDX_G_LEAD] = 0.0
     raw[:, C.IDX_G_EGO] = 0.0
     return torch.from_numpy(raw).float()
+
+
+def sample_uniform_box(
+    n: int,
+    lo: np.ndarray,
+    hi: np.ndarray,
+    *,
+    generator: np.random.Generator | None = None,
+) -> Float[Tensor, "n 6"]:
+    """Sample n initial states uniformly from per-dim bounds [lo, hi]."""
+    rng = generator if generator is not None else np.random.default_rng(C.SEED)
+    raw = rng.uniform(lo, hi, size=(n, C.STATE_DIM))
+    raw[:, C.IDX_G_LEAD] = 0.0
+    raw[:, C.IDX_G_EGO] = 0.0
+    return torch.from_numpy(raw).float()

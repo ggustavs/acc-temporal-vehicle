@@ -101,7 +101,6 @@ def sample_box(n: int, factor: float, seed: int) -> torch.Tensor:
     return torch.tensor(pts, dtype=torch.float32)
 
 
-# ---- ACC operating-point sweep --------------------------------------
 ACC_SWEEP_V_SET = (20.0, 25.0, 30.0)
 ACC_SWEEP_V_REL = (-5.0, -2.0, 0.0, 2.0, 5.0)
 ACC_SWEEP_SLACK = (5.0, 20.0, 40.0)
@@ -148,13 +147,17 @@ def acc_sweep_sample(
     return torch.from_numpy(states), torch.from_numpy(v_set_per_init), cell_id
 
 
-# ---- Arm loading ----------------------------------------------------
 def default_arms() -> dict[str, str]:
-    return {
+    arms = {
         "published": "onnx",
         "stl": str(C.STL_CHECKPOINT_PATH),
         "sfo": str(C.SFO_CHECKPOINT_PATH),
     }
+    if C.STL_FINETUNED_PATH.exists():
+        arms["stl_finetuned"] = str(C.STL_FINETUNED_PATH)
+    if C.SFO_FINETUNED_PATH.exists():
+        arms["sfo_finetuned"] = str(C.SFO_FINETUNED_PATH)
+    return arms
 
 
 def load_arms(arms_to_paths: dict[str, str]) -> dict[str, nn.Module]:

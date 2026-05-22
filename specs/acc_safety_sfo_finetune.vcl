@@ -1,4 +1,5 @@
--- ACC SFO spec: `forall x . inInitialSet x => <pred>` per property; sampler-driven.
+-- ACC SFO spec for fine-tune: same properties as acc_safety_sfo.vcl with
+-- initialLo[1] widened from 32.0 to 22.0 (slow-cruise regime).
 import STL
 
 -- QLL (Quantile Loss Logic): logsumexp-smoothed STL.
@@ -99,7 +100,7 @@ dynamics : Tensor Real [stateDim] -> Tensor Real [actDim]
         -> Tensor Real [stateDim]
 
 initialLo : Tensor Real [stateDim]
-initialLo = [85.0, 32.0, 0.0, 10.0, 30.0, 0.0]
+initialLo = [85.0, 22.0, 0.0, 10.0, 30.0, 0.0]
 
 initialHi : Tensor Real [stateDim]
 initialHi = [89.0, 32.2, 0.0, 11.0, 30.2, 0.0]

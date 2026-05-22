@@ -155,12 +155,8 @@ stabilizes = (finally [0, T - 6] (
 @property
 cruiseUntilFollow : Bool
 cruiseUntilFollow = (until [0, T - 1]
-                       (let xLead = transpose trajectory ! 0 in
-                        let xEgo  = transpose trajectory ! 3 in
-                        let vEgo  = transpose trajectory ! 4 in
-                        let dRel  = xLead - xEgo in
-                        let dSafe = const dDefault [T] + const tGap [T] * (max vEgo (const 0.0 [T])) in
-                        dRel >=. dSafe)
+                       (let vEgo = transpose trajectory ! 4 in
+                        vEgo >=. const (vSet - epsTrack) [T])
                        (globally [0, 5] (
                           let vEgo  = transpose trajectory ! 4 in
                           let vLead = transpose trajectory ! 1 in

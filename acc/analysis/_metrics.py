@@ -7,10 +7,9 @@ import torch
 from scipy.stats import beta
 
 from acc import constants as C
-from acc.analysis._data import DDEF, DT, TGAP, VSET, iGE, iVE, iXE, iXL
+from acc.analysis._data import DDEF, DT, TGAP, VSET, iGE, iVE, iVL, iXE, iXL
 
 
-# ---- safety margin --------------------------------------------------
 def margins(traj: np.ndarray) -> np.ndarray:
     drel = traj[..., iXL] - traj[..., iXE]
     dsafe = DDEF + TGAP * traj[..., iVE]
@@ -23,7 +22,6 @@ def margins_t(traj: torch.Tensor) -> torch.Tensor:
     return drel - dsafe
 
 
-# ---- comfort / jerk -------------------------------------------------
 def comfort_peak(traj: np.ndarray) -> np.ndarray:
     return np.abs(traj[..., iGE]).max(axis=1)
 
@@ -42,7 +40,6 @@ def accel_rms(traj: np.ndarray) -> np.ndarray:
     return np.sqrt((g * g).mean(axis=1))
 
 
-# ---- ACC-quality metrics -------------------------------------------
 def time_in_saturation(traj: np.ndarray, threshold_frac: float = 0.95) -> np.ndarray:
     centre = 0.5 * (C.ACT_HI + C.ACT_LO)
     half = 0.5 * (C.ACT_HI - C.ACT_LO)

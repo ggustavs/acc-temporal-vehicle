@@ -21,6 +21,8 @@ _LOADERS: dict[str, Callable[[], nn.Module]] = {
     "published": lambda: published_controller(C.PUBLISHED_ONNX),
     "stl": lambda: _load_checkpoint(C.STL_CHECKPOINT_PATH),
     "sfo": lambda: _load_checkpoint(C.SFO_CHECKPOINT_PATH),
+    "stl_finetuned": lambda: _load_checkpoint(C.STL_FINETUNED_PATH),
+    "sfo_finetuned": lambda: _load_checkpoint(C.SFO_FINETUNED_PATH),
 }
 
 
@@ -38,9 +40,7 @@ def validate_arm(
     """Run Vehicle `safe` + immrax CROWN on the given arm's controller."""
     console = Console()
     if arm not in _LOADERS:
-        raise typer.BadParameter(
-            f"unknown arm '{arm}'; pick from {list(_LOADERS)}"
-        )
+        raise typer.BadParameter(f"unknown arm '{arm}'; pick from {list(_LOADERS)}")
 
     net = _LOADERS[arm]()
     net.eval()
@@ -76,7 +76,8 @@ def validate_arm(
     rows = [(label, safe_check(net, x0)) for label, x0 in inits]
 
     render_property_check_table(
-        console, rows,
+        console,
+        rows,
         title=f"Vehicle-compiled `safe` per initial state ({arm})",
     )
     if verifier_results:
@@ -119,4 +120,10 @@ validate_app.command(name="stl")(
 )
 validate_app.command(name="sfo")(
     _make_command("sfo", "Validate the SFO-trained controller checkpoint.")
+)
+validate_app.command(name="stl_finetuned")(
+    _make_command("stl_finetuned", "Validate the slow-lead STL fine-tuned checkpoint.")
+)
+validate_app.command(name="sfo_finetuned")(
+    _make_command("sfo_finetuned", "Validate the slow-lead SFO fine-tuned checkpoint.")
 )

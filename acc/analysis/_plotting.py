@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
 
 import matplotlib
 
@@ -14,7 +13,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 
-# ---- Arm colour / label maps ---------------------------------------
 _COLOUR = {"published": "#1f77b4", "stl": "#d62728", "sfo": "#2ca02c"}
 _DEFAULT_COLOURS = ["#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
 _LABEL = {"published": "pub", "stl": "stl", "sfo": "sfo"}
@@ -28,7 +26,6 @@ def label_for(arm: str) -> str:
     return _LABEL.get(arm, arm)
 
 
-# ---- Save helper ---------------------------------------------------
 def save_figure(
     fig: Figure,
     fig_dir: Path,
@@ -44,7 +41,6 @@ def save_figure(
     plt.close(fig)
 
 
-# ---- Plot primitives -----------------------------------------------
 def time_series_band(
     ax: Axes,
     t: np.ndarray,

@@ -36,7 +36,8 @@ def crown_bounds(net: nn.Module) -> tuple[np.ndarray, np.ndarray]:
     """Per-step interval reachable set [lower, upper] over N_STEPS."""
     ctrl = _ACCController(_jax_weights_from_torch(net))
     emb = immrax.NNCEmbeddingSystem(
-        immrax.NNCSystem(_ACCOpenLoop(), ctrl), nn_verifier="crown"
+        immrax.NNCSystem(_ACCOpenLoop(), ctrl),  # pyright: ignore[reportArgumentType]
+        nn_verifier="crown",
     )
     init_ix = immrax.interval(jnp.asarray(C.INITIAL_LO), jnp.asarray(C.INITIAL_HI))
     n_corner = 1 + C.STATE_DIM + ctrl.out_len
@@ -59,15 +60,13 @@ def crown_bounds(net: nn.Module) -> tuple[np.ndarray, np.ndarray]:
     for ut in ys[: C.N_STEPS]:
         if not np.all(np.isfinite(ut)):
             break
-        l, u = immrax.i2lu(immrax.ut2i(jnp.asarray(ut)))
-        lo.append(np.asarray(l))
-        hi.append(np.asarray(u))
+        lo_i, hi_i = immrax.i2lu(immrax.ut2i(jnp.asarray(ut)))
+        lo.append(np.asarray(lo_i))
+        hi.append(np.asarray(hi_i))
     return np.array(lo), np.array(hi)
 
 
-def _crown_margin_band(
-    lo: np.ndarray, hi: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+def _crown_margin_band(lo: np.ndarray, hi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Lower / upper bound of the safety margin from interval state bounds.
     Each component takes its monotone-worst case: lower margin uses
     upper(x_ego), upper(v_ego); upper margin uses lower(x_ego),
@@ -96,9 +95,7 @@ def formal_compute(arms: dict) -> dict[str, dict[str, np.ndarray]]:
     return out
 
 
-def formal_render(
-    data: dict[str, dict[str, np.ndarray]], fig_dir: Path
-) -> None:
+def formal_render(data: dict[str, dict[str, np.ndarray]], fig_dir: Path) -> None:
     n_arms = len(data)
     width = 17 if n_arms == 3 else max(5.7 * n_arms, 6.0)
     fig, axes = plt.subplots(1, n_arms, figsize=(width, 4.4), sharex=True)
@@ -108,10 +105,15 @@ def formal_render(
         S = band["crown_lo"].shape[0]
         t = np.arange(S) * DT
         crown_vs_mc_panel(
-            axes[j], t,
-            band["crown_lo"], band["crown_hi"],
-            band["mc_lo"], band["mc_hi"], band["mc_worst"],
-            arm=arm, fallback_index=j,
+            axes[j],
+            t,
+            band["crown_lo"],
+            band["crown_hi"],
+            band["mc_lo"],
+            band["mc_hi"],
+            band["mc_worst"],
+            arm=arm,
+            fallback_index=j,
         )
     fig.suptitle(
         "Formal (CROWN) vs empirical (MC) safety margin, training plant. "

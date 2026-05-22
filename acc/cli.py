@@ -13,11 +13,10 @@ app = typer.Typer(
 train_app = typer.Typer(
     no_args_is_help=True, help="Train a controller from a Vehicle spec."
 )
-tune_app = typer.Typer(
-    no_args_is_help=True, help="Hyperparameter search via Optuna."
-)
+tune_app = typer.Typer(no_args_is_help=True, help="Hyperparameter search via Optuna.")
 evaluate_app = typer.Typer(
-    no_args_is_help=True, help="Per-property evaluation (centre + corners + PGD + CROWN)."
+    no_args_is_help=True,
+    help="Per-property evaluation (centre + corners + PGD + CROWN).",
 )
 validate_app = typer.Typer(
     no_args_is_help=True,

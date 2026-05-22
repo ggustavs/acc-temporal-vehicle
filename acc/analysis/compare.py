@@ -53,7 +53,9 @@ def compare_core(
                 "corners_all_pass": pp["corners_all_pass"],
                 "pgd_worst_loss": pp["pgd_worst_loss"],
                 "pgd_passes": pp["pgd_passes"],
-                "verified": ver.get(prop, {}).get("verified") if prop in invariant else None,
+                "verified": ver.get(prop, {}).get("verified")
+                if prop in invariant
+                else None,
                 "satisfied": sat,
             }
         rows.append(row)
@@ -67,7 +69,9 @@ def compare_core(
         "satisfied_count": satisfied,
         "deltas_vs_baseline": {
             w: {
-                r["property"]: round(r[w]["centre_loss"] - r[baseline]["centre_loss"], 4)
+                r["property"]: round(
+                    r[w]["centre_loss"] - r[baseline]["centre_loss"], 4
+                )
                 for r in rows
             }
             for w in delta_arms
@@ -108,7 +112,9 @@ def compare_core(
         L.append("")
     if delta_arms:
         L.append(f"## Centre-loss delta vs {baseline} (negative = better)\n")
-        L.append("| property | " + " | ".join(f"{w}-{baseline}" for w in delta_arms) + " |")
+        L.append(
+            "| property | " + " | ".join(f"{w}-{baseline}" for w in delta_arms) + " |"
+        )
         L.append("|---|" + "|".join(["---"] * len(delta_arms)) + "|")
         for prop in props:
             deltas = " | ".join(

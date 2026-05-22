@@ -13,7 +13,7 @@ from vehicle_lang.typing import Target
 from acc import constants as C
 from acc._vlang import load_specification
 from acc.cli import train_app
-from acc.controller import fresh_controller
+from acc.controller import fresh_controller, load_checkpoint
 from acc.dynamics import acc_dynamics_step
 from acc.gradnorm import GuardedGradNormBalancer as GradNormBalancer
 from acc.io import dump_sfo_history_csv
@@ -32,6 +32,7 @@ def train_sfo_loop(
     logic: Target = C.DIFFERENTIABLE_LOGIC,
     console: Optional[Console] = None,
     report_cb: Optional[Callable[[int, float], bool]] = None,
+    warm_start_path: Optional[Path] = None,
 ) -> float:
     """`report_cb(epoch, mean_sfo) -> True` aborts early."""
     console = console or Console()
@@ -54,6 +55,8 @@ def train_sfo_loop(
     )
 
     net = fresh_controller()
+    if warm_start_path is not None:
+        net.load_state_dict(load_checkpoint(warm_start_path))
     optim = torch.optim.Adam(net.parameters(), lr=lr)
 
     def _sat(v: torch.Tensor) -> torch.Tensor:
@@ -61,11 +64,7 @@ def train_sfo_loop(
 
     balancer = GradNormBalancer(
         losses={
-            name: (
-                lambda fn=fn: _sat(
-                    fn(controller=net, dynamics=acc_dynamics_step)
-                )
-            )
+            name: (lambda fn=fn: _sat(fn(controller=net, dynamics=acc_dynamics_step)))
             for name, fn in property_fns.items()
         },
         model=net,
@@ -119,6 +118,9 @@ def train_sfo(
     lr: float = typer.Option(C.SFO_LR),
     history_path: Path = typer.Option(C.RESULTS_DIR / "sfo_history.csv"),
     logic: str = typer.Option(C.DEFAULT_LOGIC_NAME, help=C.LOGIC_OPTION_HELP),
+    warm_start_path: Optional[Path] = typer.Option(
+        None, help="Warm-start from this checkpoint instead of a fresh MLP."
+    ),
 ) -> None:
     """Train from random init using only the Vehicle SFO property loss."""
     train_sfo_loop(
@@ -129,4 +131,5 @@ def train_sfo(
         steps_per_epoch=steps_per_epoch,
         lr=lr,
         history_path=history_path,
+        warm_start_path=warm_start_path,
     )

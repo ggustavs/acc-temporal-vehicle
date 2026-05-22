@@ -13,8 +13,10 @@ LeadFn = Callable[[int, torch.Tensor], torch.Tensor]
 
 def lead_constant_v(v_target: float, gain: float = 1.0) -> LeadFn:
     """P-controller pulling v_lead toward v_target. Comfort-clamped."""
+
     def fn(t: int, s: torch.Tensor) -> torch.Tensor:
         return torch.clamp(gain * (v_target - s[:, iVL]), -1.5, 1.5)
+
     return fn
 
 
@@ -44,5 +46,3 @@ def lead_ramp_acc(a: float, t_start_s: float, t_end_s: float) -> LeadFn:
         return torch.zeros_like(s[:, iVL])
 
     return fn
-
-

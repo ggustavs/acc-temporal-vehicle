@@ -2,6 +2,14 @@
 build-backend = "hatchling.build"
 requires = ["hatchling"]
 
+[dependency-groups]
+dev = [
+  "matplotlib>=3.9.4",
+  "pandas>=3.0.3",
+  "seaborn>=0.13.2",
+  "tqdm>=4.67.3"
+]
+
 [project]
 dependencies = [
   "torch>=2.2",
@@ -46,11 +54,3 @@ ignore = ["F722"]
 
 [tool.uv.sources]
 vehicle-lang = {editable = true, path = "../vehicle/vehicle-python"}
-
-[dependency-groups]
-dev = [
-    "matplotlib>=3.9.4",
-    "pandas>=3.0.3",
-    "seaborn>=0.13.2",
-    "tqdm>=4.67.3",
-]

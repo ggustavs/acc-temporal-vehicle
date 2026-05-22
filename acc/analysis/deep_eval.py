@@ -52,7 +52,6 @@ N = 4000
 FACTOR_VALUES: tuple[float, ...] = (1.0, 1.5, 2.0)
 
 
-# ============================================================ envelopes
 def envelopes_compute(arms: dict) -> dict[str, np.ndarray]:
     x0 = sample_box(N, 1.0, SEED)
     return {k: rollout(v, x0, "training").numpy() for k, v in arms.items()}
@@ -70,7 +69,8 @@ def envelopes_render(trajs: dict[str, np.ndarray], fig_dir: Path) -> None:
     fig, axes = plt.subplots(1, len(_ENVELOPE_PANELS), figsize=(15, 4.0))
     for ax, (ylabel, metric, refline) in zip(axes, _ENVELOPE_PANELS):
         time_series_band(
-            ax, t,
+            ax,
+            t,
             {k: metric(tr) for k, tr in trajs.items()},
             bands=False,
             ylabel=ylabel,
@@ -91,7 +91,6 @@ def envelopes_summarise(trajs: dict[str, np.ndarray]) -> dict:
     }
 
 
-# ============================================================ pareto
 def pareto_compute(arms: dict) -> dict[str, np.ndarray]:
     # Same rollouts as envelopes; recompute here so the analysis is
     # self-contained (cheap: 4000 inits, ~1 s per arm).
@@ -125,11 +124,12 @@ def pareto_summarise(trajs: dict[str, np.ndarray]) -> dict:
     }
 
 
-# ============================================================ factor stress (JSON-only)
 def factor_stress_compute(arms: dict) -> dict[float, dict[str, np.ndarray]]:
     return {
-        f: {k: rollout(v, sample_box(N, f, SEED + int(f * 10)),
-                       "training").numpy() for k, v in arms.items()}
+        f: {
+            k: rollout(v, sample_box(N, f, SEED + int(f * 10)), "training").numpy()
+            for k, v in arms.items()
+        }
         for f in FACTOR_VALUES
     }
 
@@ -157,13 +157,12 @@ def factor_stress_summarise(
                 "time_in_saturation_mean": float(time_in_saturation(tr).mean()),
                 "time_headway_rmse_median": float(np.median(time_headway_rmse(tr))),
                 "vset_rmse": float(
-                    np.sqrt(((tr[:, T // 2:, iVE] - VSET) ** 2).mean())
+                    np.sqrt(((tr[:, T // 2 :, iVE] - VSET) ** 2).mean())
                 ),
             }
     return out
 
 
-# ============================================================ adversarial PGD
 _ADV_PGD_STEPS = (0, 1, 5, 10, 20)
 _ADV_N = 512
 _ADV_LR = 0.10
@@ -208,8 +207,7 @@ def adversarial_compute(arms: dict) -> dict:
 def adversarial_render(data: dict, fig_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(6.5, 4.5))
     for i, (k, curve) in enumerate(data["sweep"].items()):
-        ax.plot(_ADV_PGD_STEPS, curve, "o-",
-                color=colour_for(k, i), label=label_for(k))
+        ax.plot(_ADV_PGD_STEPS, curve, "o-", color=colour_for(k, i), label=label_for(k))
     ax.axhline(0, ls="--", c="k", lw=1)
     ax.set(
         xlabel="PGD steps on initial state",
@@ -230,13 +228,13 @@ def adversarial_render(data: dict, fig_dir: Path) -> None:
         d_rel = tr[:, iXL] - tr[:, iXE]
         d_safe = C.D_DEFAULT + C.T_GAP * tr[:, iVE]
         axes[0].plot(tt, d_rel, color=c, label=f"dRel ({label_for(k)})")
-        axes[0].plot(tt, d_safe, color=c, lw=1.0, ls="--",
-                     label=f"dSafe ({label_for(k)})")
+        axes[0].plot(
+            tt, d_safe, color=c, lw=1.0, ls="--", label=f"dSafe ({label_for(k)})"
+        )
     axes[0].set(xlabel="t [s]", ylabel="dRel, dSafe [m]")
     # Panel 2: ego accel.
     for i, (k, tr) in enumerate(data["worst_trajs"].items()):
-        axes[1].plot(tt, tr[:, iGE], color=colour_for(k, i),
-                     label=label_for(k))
+        axes[1].plot(tt, tr[:, iGE], color=colour_for(k, i), label=label_for(k))
     for b in (-CMAX, CMAX):
         axes[1].axhline(b, ls="--", c="k", lw=0.5)
     axes[1].set(xlabel="t [s]", ylabel="Ego acceleration [m/s$^2$]")
@@ -259,7 +257,6 @@ def adversarial_summarise(data: dict) -> dict:
     }
 
 
-# ============================================================ Vehicle quantitative robustness
 _VR_N = 192
 
 
@@ -315,7 +312,6 @@ def vehicle_robustness_summarise(
     }
 
 
-# ============================================================ ACC scenarios
 _ACC_SCENARIOS: dict[str, dict[str, Any]] = {
     "steady_follow_v22": {
         "desc": "v_set=30, lead settles to 22 m/s -- gap regulation under a slower lead",
@@ -323,6 +319,22 @@ _ACC_SCENARIOS: dict[str, dict[str, Any]] = {
         "v_ego0": 30.0,
         "v_lead0": 22.0,
         "lead_fn": lead_constant_v(22.0),
+        "release_step": 0,
+    },
+    "steady_follow_v25": {
+        "desc": "v_set=30, lead settles to 25 m/s -- moderate-slower lead",
+        "v_set": 30.0,
+        "v_ego0": 30.0,
+        "v_lead0": 25.0,
+        "lead_fn": lead_constant_v(25.0),
+        "release_step": 0,
+    },
+    "steady_follow_v28": {
+        "desc": "v_set=30, lead settles to 28 m/s -- mild gap regulation",
+        "v_set": 30.0,
+        "v_ego0": 30.0,
+        "v_lead0": 28.0,
+        "lead_fn": lead_constant_v(28.0),
         "release_step": 0,
     },
     "lead_pullaway": {
@@ -374,9 +386,7 @@ _SCENARIO_COL_TITLES = (
 )
 
 
-def acc_scenarios_render(
-    data: dict[str, dict[str, Any]], fig_dir: Path
-) -> None:
+def acc_scenarios_render(data: dict[str, dict[str, Any]], fig_dir: Path) -> None:
     scenarios = list(data.keys())
     n_scn = len(scenarios)
     tt = np.arange(T + 1) * DT
@@ -385,9 +395,11 @@ def acc_scenarios_render(
     # Header height is small relative to the panel rows.
     fig = plt.figure(figsize=(13, 3.6 * n_scn + 0.4))
     gs = fig.add_gridspec(
-        2 * n_scn, 3,
+        2 * n_scn,
+        3,
         height_ratios=[0.18, 1.0] * n_scn,
-        hspace=0.45, wspace=0.28,
+        hspace=0.45,
+        wspace=0.28,
     )
 
     axes = np.empty((n_scn, 3), dtype=object)
@@ -406,10 +418,10 @@ def acc_scenarios_render(
             axes[r, 1].plot(tt, tr[:, iGE], color=c, label=label_for(arm))
             d_rel = tr[:, iXL] - tr[:, iXE]
             d_safe = C.D_DEFAULT + C.T_GAP * tr[:, iVE]
-            axes[r, 2].plot(tt, d_rel, color=c,
-                            label=f"dRel ({label_for(arm)})")
-            axes[r, 2].plot(tt, d_safe, color=c, lw=1.0, ls="--",
-                            label=f"dSafe ({label_for(arm)})")
+            axes[r, 2].plot(tt, d_rel, color=c, label=f"dRel ({label_for(arm)})")
+            axes[r, 2].plot(
+                tt, d_safe, color=c, lw=1.0, ls="--", label=f"dSafe ({label_for(arm)})"
+            )
         for b in (-CMAX, CMAX):
             axes[r, 1].axhline(b, ls="--", c="k", lw=0.5)
         for c_idx in range(3):
@@ -425,20 +437,26 @@ def acc_scenarios_render(
         header_ax = fig.add_subplot(gs[2 * r, :])
         header_ax.axis("off")
         header_ax.text(
-            0.5, 0.5, data[scn]["desc"],
-            ha="center", va="center",
-            fontsize=11, fontweight="bold",
+            0.5,
+            0.5,
+            data[scn]["desc"],
+            ha="center",
+            va="center",
+            fontsize=11,
+            fontweight="bold",
             transform=header_ax.transAxes,
         )
 
-    # Column titles only in the topmost panel row.
     for c_idx, ct in enumerate(_SCENARIO_COL_TITLES):
         axes[0, c_idx].set_title(ct, fontsize=10)
     for c_idx in range(3):
         axes[-1, c_idx].set_xlabel("t [s]")
 
-    fig.suptitle("ACC scenarios -- rows: scenarios, cols: lead context / ego response",
-                 fontsize=11, y=0.995)
+    fig.suptitle(
+        "ACC scenarios -- rows: scenarios, cols: lead context / ego response",
+        fontsize=11,
+        y=0.995,
+    )
     save_figure(fig, fig_dir, "acc_scenarios_traj.png")
 
 
@@ -451,8 +469,10 @@ def acc_scenarios_summarise(
         for arm, tr in sc["trajs"].items():
             mm = margins(tr[None])[0]
             rec = vset_recovery_time(
-                tr[None], v_set=sc["v_set"],
-                release_step=sc["release_step"], tol=0.5,
+                tr[None],
+                v_set=sc["v_set"],
+                release_step=sc["release_step"],
+                tol=0.5,
             )
             rec_val = float(rec[0]) if not np.isnan(rec[0]) else None
             out[scn][arm] = {
@@ -469,19 +489,25 @@ def acc_scenarios_summarise(
     return out
 
 
-# ============================================================ orchestrator
 ANALYSES: dict[str, tuple[Callable, Callable, Callable]] = {
     "envelopes": (envelopes_compute, envelopes_render, envelopes_summarise),
     "pareto": (pareto_compute, pareto_render, pareto_summarise),
-    "factor_stress": (factor_stress_compute, factor_stress_render,
-                      factor_stress_summarise),
-    "adversarial": (adversarial_compute, adversarial_render,
-                    adversarial_summarise),
-    "vehicle_robustness": (vehicle_robustness_compute,
-                           vehicle_robustness_render,
-                           vehicle_robustness_summarise),
-    "acc_scenarios": (acc_scenarios_compute, acc_scenarios_render,
-                      acc_scenarios_summarise),
+    "factor_stress": (
+        factor_stress_compute,
+        factor_stress_render,
+        factor_stress_summarise,
+    ),
+    "adversarial": (adversarial_compute, adversarial_render, adversarial_summarise),
+    "vehicle_robustness": (
+        vehicle_robustness_compute,
+        vehicle_robustness_render,
+        vehicle_robustness_summarise,
+    ),
+    "acc_scenarios": (
+        acc_scenarios_compute,
+        acc_scenarios_render,
+        acc_scenarios_summarise,
+    ),
 }
 
 

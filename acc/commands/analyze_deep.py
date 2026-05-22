@@ -32,7 +32,7 @@ def analyze_deep(
         help="nominal = ARCH-COMP box; acc-sweep = 45-cell ACC operating-point grid.",
     ),
 ) -> None:
-    """Behaviour envelopes + figures + per-property robustness over the 3 arms."""
+    """Behaviour envelopes + figures + per-property robustness across arms."""
     arms = parse_checkpoint_kvs(checkpoint or [], default_arms())
     if out_dir is None:
         out_dir = C.RESULTS_DIR / "deep_eval"

@@ -31,14 +31,16 @@ def _archcomp_step(state: jnp.ndarray, action: jnp.ndarray) -> jnp.ndarray:
     g_ego = state[C.IDX_G_EGO]
     a_ego = action[0]
     a_lead = ARCHCOMP_A_LEAD
-    deriv = jnp.stack([
-        v_lead,
-        g_lead,
-        (a_lead - g_lead) / C.TAU - C.MU * v_lead * v_lead,
-        v_ego,
-        g_ego,
-        (a_ego - g_ego) / C.TAU - C.MU * v_ego * v_ego,
-    ])
+    deriv = jnp.stack(
+        [
+            v_lead,
+            g_lead,
+            (a_lead - g_lead) / C.TAU - C.MU * v_lead * v_lead,
+            v_ego,
+            g_ego,
+            (a_ego - g_ego) / C.TAU - C.MU * v_ego * v_ego,
+        ]
+    )
     return state + C.DT * deriv
 
 
@@ -100,9 +102,7 @@ def archcomp_compute(arms: dict[str, nn.Module]) -> dict:
     out: dict = {}
     for tag, net in arms.items():
         res, rt = score_one(net)
-        out[tag] = {
-            k: {"verified": v[0], "note": v[1]} for k, v in res.items()
-        }
+        out[tag] = {k: {"verified": v[0], "note": v[1]} for k, v in res.items()}
         out[tag]["runtime_s"] = round(rt, 2)
     return out
 
@@ -167,7 +167,8 @@ def archcomp_core(
         r = summary["results"][tag]
         verdict = {
             k: ("VERIFIED" if r[k]["verified"] else "FALSIFIED")
-            for k in r if k != "runtime_s"
+            for k in r
+            if k != "runtime_s"
         }
         console.print(f"{tag} {verdict} {r['runtime_s']:.1f}s")
     console.print(f"wrote {out_dir / 'archcomp_score.md'}")

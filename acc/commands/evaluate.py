@@ -19,6 +19,8 @@ _CHECKPOINTS = {
     "published": ("Published ONNX", "onnx"),
     "stl": ("STL fine-tune", C.STL_CHECKPOINT_PATH),
     "sfo": ("SFO fine-tune", C.SFO_CHECKPOINT_PATH),
+    "stl_finetuned": ("STL fine-tune (slow lead)", C.STL_FINETUNED_PATH),
+    "sfo_finetuned": ("SFO fine-tune (slow lead)", C.SFO_FINETUNED_PATH),
 }
 
 
@@ -73,4 +75,10 @@ evaluate_app.command(name="stl")(
 )
 evaluate_app.command(name="sfo")(
     _make_command("sfo", "Evaluate the SFO-trained controller checkpoint.")
+)
+evaluate_app.command(name="stl_finetuned")(
+    _make_command("stl_finetuned", "Evaluate the slow-lead STL fine-tuned checkpoint.")
+)
+evaluate_app.command(name="sfo_finetuned")(
+    _make_command("sfo_finetuned", "Evaluate the slow-lead SFO fine-tuned checkpoint.")
 )

@@ -21,18 +21,14 @@ def _torch_step(state: np.ndarray, action: np.ndarray) -> np.ndarray:
 
 
 def _jax_step(state: np.ndarray, action: np.ndarray) -> np.ndarray:
-    return np.asarray(
-        _acc_dynamics_step_jax(jnp.asarray(state), jnp.asarray(action))
-    )
+    return np.asarray(_acc_dynamics_step_jax(jnp.asarray(state), jnp.asarray(action)))
 
 
 def test_jax_matches_pytorch_random():
     rng = np.random.default_rng(C.SEED)
     for trial in range(10):
         state = rng.normal(size=(C.STATE_DIM,)).astype(np.float32)
-        action = rng.uniform(C.ACT_LO, C.ACT_HI, size=(C.ACT_DIM,)).astype(
-            np.float32
-        )
+        action = rng.uniform(C.ACT_LO, C.ACT_HI, size=(C.ACT_DIM,)).astype(np.float32)
         np.testing.assert_allclose(
             _jax_step(state, action),
             _torch_step(state, action),
