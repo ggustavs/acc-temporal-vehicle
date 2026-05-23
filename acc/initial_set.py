@@ -19,16 +19,26 @@ def _bounds(factor: float) -> tuple[np.ndarray, np.ndarray]:
     return centre - factor * half, centre + factor * half
 
 
-def centre_point() -> Float[Tensor, "1 6"]:
-    centre = 0.5 * (C.INITIAL_LO + C.INITIAL_HI)
+def centre_point(
+    lo: np.ndarray | None = None,
+    hi: np.ndarray | None = None,
+) -> Float[Tensor, "1 6"]:
+    lo_arr = C.INITIAL_LO if lo is None else lo
+    hi_arr = C.INITIAL_HI if hi is None else hi
+    centre = 0.5 * (lo_arr + hi_arr)
     return torch.from_numpy(centre).float().unsqueeze(0)
 
 
-def corner_points() -> Float[Tensor, "16 6"]:
+def corner_points(
+    lo: np.ndarray | None = None,
+    hi: np.ndarray | None = None,
+) -> Float[Tensor, "16 6"]:
+    lo_arr = C.INITIAL_LO if lo is None else lo
+    hi_arr = C.INITIAL_HI if hi is None else hi
     free = list(_FREE_INDICES)
     masks = np.array(list(product((0, 1), repeat=len(free))), dtype=bool)
-    pts = np.tile(C.INITIAL_LO, (len(masks), 1))
-    pts[:, free] = np.where(masks, C.INITIAL_HI[free], C.INITIAL_LO[free])
+    pts = np.tile(lo_arr, (len(masks), 1))
+    pts[:, free] = np.where(masks, hi_arr[free], lo_arr[free])
     return torch.from_numpy(pts).float()
 
 

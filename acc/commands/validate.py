@@ -11,6 +11,7 @@ from vehicle_lang.loss import pytorch as loss_pt
 from acc import constants as C
 from acc.cli import validate_app
 from acc.controller import fresh_controller, load_checkpoint, published_controller
+from acc.dynamics import acc_dynamics_step, constant_lead_dynamics_step
 from acc.initial_set import centre_point, corner_points
 from acc.io import dump_trajectories_csv
 from acc.presenters import render_property_check_table, render_verifier_table
@@ -32,10 +33,25 @@ def _load_checkpoint(path: Path) -> nn.Module:
     return net
 
 
+def _box_bounds(init_box: str):
+    """Returns (init_lo, init_hi, dynamics_fn, plant_name)."""
+    if init_box == "default":
+        return C.INITIAL_LO, C.INITIAL_HI, acc_dynamics_step, "default"
+    if init_box == "finetune":
+        return (
+            C.INITIAL_LO_FINETUNE, C.INITIAL_HI_FINETUNE,
+            constant_lead_dynamics_step, "constant_lead",
+        )
+    raise typer.BadParameter(
+        f"unknown --init-box {init_box!r}; pick from default | finetune"
+    )
+
+
 def validate_arm(
     arm: str,
     csv_out: Path,
     logic: str,
+    init_box: str = "default",
 ) -> None:
     """Run Vehicle `safe` + immrax CROWN on the given arm's controller."""
     console = Console()
@@ -45,17 +61,19 @@ def validate_arm(
     net = _LOADERS[arm]()
     net.eval()
 
-    console.log(f"Loading Vehicle spec (logic={logic})...")
+    init_lo, init_hi, dynamics_fn, plant = _box_bounds(init_box)
+
+    console.log(f"Loading Vehicle spec (logic={logic}, init_box={init_box})...")
     declarations = loss_pt.load_specification(
         C.ACC_SPEC_PATH,
         logic=C.to_logic(logic),
         declarations=("safe", "trajectory"),
     )
-    checks = load_property_checks(declarations, names=("safe",))
-    rollout = load_trajectory(declarations)
+    checks = load_property_checks(declarations, names=("safe",), dynamics_fn=dynamics_fn)
+    rollout = load_trajectory(declarations, dynamics_fn=dynamics_fn)
     safe_check = checks["safe"]
 
-    centre = centre_point().squeeze(0)
+    centre = centre_point(init_lo, init_hi).squeeze(0)
     centre_result = safe_check(net, centre)
     if not centre_result.passes:
         raise typer.Exit(code=2) from AssertionError(
@@ -64,12 +82,14 @@ def validate_arm(
         )
 
     try:
-        verifier_results = verify_initial_box_invariants(net)
+        verifier_results = verify_initial_box_invariants(
+            net, initial_lo=init_lo, initial_hi=init_hi, plant=plant
+        )
     except NotImplementedError as exc:
         verifier_results = {}
         console.log(f"[yellow]Verifier inconclusive: {exc}[/yellow]")
 
-    corners = corner_points()
+    corners = corner_points(init_lo, init_hi)
     inits = [("centre", centre)] + [
         (f"corner-{i}", corners[i]) for i in range(corners.shape[0])
     ]
@@ -105,8 +125,13 @@ def _make_command(arm: str, doc: str):
     def cmd(
         csv_out: Path = typer.Option(default_csv, help="Per-step CSV"),
         logic: str = typer.Option(C.DEFAULT_LOGIC_NAME, help=C.LOGIC_OPTION_HELP),
+        init_box: str = typer.Option(
+            "default",
+            "--init-box",
+            help="default = INITIAL_LO/HI; finetune = INITIAL_LO/HI_FINETUNE.",
+        ),
     ) -> None:
-        validate_arm(arm, csv_out, logic)
+        validate_arm(arm, csv_out, logic, init_box=init_box)
 
     cmd.__doc__ = doc
     return cmd

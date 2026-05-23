@@ -1,7 +1,7 @@
 """Train the controller against the Vehicle SFO property loss (per-property GradNorm)."""
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import typer
@@ -14,7 +14,7 @@ from acc import constants as C
 from acc._vlang import load_specification
 from acc.cli import train_app
 from acc.controller import fresh_controller, load_checkpoint
-from acc.dynamics import acc_dynamics_step
+from acc.dynamics import acc_dynamics_step, constant_lead_dynamics_step
 from acc.gradnorm import GuardedGradNormBalancer as GradNormBalancer
 from acc.io import dump_sfo_history_csv
 from acc.presenters import render_sfo_summary
@@ -33,6 +33,7 @@ def train_sfo_loop(
     console: Optional[Console] = None,
     report_cb: Optional[Callable[[int, float], bool]] = None,
     warm_start_path: Optional[Path] = None,
+    dynamics_fn: Any = acc_dynamics_step,
 ) -> float:
     """`report_cb(epoch, mean_sfo) -> True` aborts early."""
     console = console or Console()
@@ -64,7 +65,7 @@ def train_sfo_loop(
 
     balancer = GradNormBalancer(
         losses={
-            name: (lambda fn=fn: _sat(fn(controller=net, dynamics=acc_dynamics_step)))
+            name: (lambda fn=fn: _sat(fn(controller=net, dynamics=dynamics_fn)))
             for name, fn in property_fns.items()
         },
         model=net,
@@ -121,8 +122,22 @@ def train_sfo(
     warm_start_path: Optional[Path] = typer.Option(
         None, help="Warm-start from this checkpoint instead of a fresh MLP."
     ),
+    init_mode: str = typer.Option(
+        "default",
+        help="default = acc_dynamics_step (sigmoid-decel lead); "
+        "finetune = constant_lead_dynamics_step (lead held at init v). "
+        "Pair `finetune` with --spec-path specs/acc_safety_sfo_finetune.vcl.",
+    ),
 ) -> None:
     """Train from random init using only the Vehicle SFO property loss."""
+    if init_mode == "finetune":
+        dynamics_fn: Any = constant_lead_dynamics_step
+    elif init_mode == "default":
+        dynamics_fn = acc_dynamics_step
+    else:
+        raise typer.BadParameter(
+            f"unknown --init-mode {init_mode!r}; pick from default | finetune"
+        )
     train_sfo_loop(
         logic=C.to_logic(logic),
         spec_path=spec_path,
@@ -132,4 +147,5 @@ def train_sfo(
         lr=lr,
         history_path=history_path,
         warm_start_path=warm_start_path,
+        dynamics_fn=dynamics_fn,
     )

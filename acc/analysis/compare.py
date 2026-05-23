@@ -15,8 +15,13 @@ from rich.console import Console
 from acc import constants as C
 
 
-def _load(metrics_dir: Path, which: str) -> dict:
-    return json.loads((metrics_dir / f"{which}_metrics.json").read_text())
+def _metrics_path(metrics_dir: Path, which: str, suffix: str = "") -> Path:
+    name = f"{which}_metrics.json" if not suffix else f"{which}_metrics_{suffix}.json"
+    return metrics_dir / name
+
+
+def _load(metrics_dir: Path, which: str, suffix: str = "") -> dict:
+    return json.loads(_metrics_path(metrics_dir, which, suffix).read_text())
 
 
 def _satisfied(prop: str, pp: dict, ver: dict, invariant: set[str]) -> bool:
@@ -32,11 +37,12 @@ def compare_core(
     out_dir: Path,
     baseline: str = "published",
     console: Optional[Console] = None,
+    suffix: str = "",
 ) -> dict:
     console = console or Console()
     out_dir.mkdir(parents=True, exist_ok=True)
     invariant = set(C.INVARIANT_PROPERTY_NAMES)
-    data = {w: _load(metrics_dir, w) for w in arms}
+    data = {w: _load(metrics_dir, w, suffix) for w in arms}
     props = list(C.PROPERTY_NAMES)
 
     rows: list[dict] = []
@@ -78,7 +84,8 @@ def compare_core(
         },
         "baseline": baseline,
     }
-    (out_dir / "comparison.json").write_text(json.dumps(report, indent=2))
+    out_name = "comparison.json" if not suffix else f"comparison_{suffix}.json"
+    (out_dir / out_name).write_text(json.dumps(report, indent=2))
 
     L: list[str] = []
     L.append(f"# Controller comparison vs {baseline}\n")
@@ -121,8 +128,9 @@ def compare_core(
                 f"{report['deltas_vs_baseline'][w][prop]:+.3f}" for w in delta_arms
             )
             L.append(f"| {prop} | {deltas} |")
-    (out_dir / "comparison.md").write_text("\n".join(L) + "\n")
+    md_name = "comparison.md" if not suffix else f"comparison_{suffix}.md"
+    (out_dir / md_name).write_text("\n".join(L) + "\n")
 
-    console.print(f"wrote {out_dir / 'comparison.md'} and comparison.json")
+    console.print(f"wrote {out_dir / md_name} and {out_name}")
     console.print(f"satisfied: {satisfied}")
     return report

@@ -172,16 +172,63 @@ class _ACCOpenLoop(immrax.OpenLoopSystem):
         return _acc_dynamics_step_jax(x, u)
 
 
+def _constant_lead_dynamics_step_jax(
+    state: jax.Array, action: jax.Array
+) -> jax.Array:
+    """JAX mirror of acc.dynamics._constant_lead_dynamics_step_impl: lead
+    held at init v_lead (a_lead = 0, g_lead = 0), ego dynamics unchanged."""
+    v_lead = state[C.IDX_V_LEAD]
+    v_ego = state[C.IDX_V_EGO]
+    g_ego = state[C.IDX_G_EGO]
+
+    centre = 0.5 * (C.ACT_HI + C.ACT_LO)
+    half = 0.5 * (C.ACT_HI - C.ACT_LO)
+    a_ego = centre + half * jnp.tanh((action[0] - centre) / half)
+
+    dx_lead = v_lead
+    dv_lead = jnp.zeros_like(v_lead)
+    dg_lead = jnp.zeros_like(v_lead)
+    dx_ego = v_ego
+    dv_ego = g_ego
+    dg_ego = (a_ego - g_ego) / C.TAU - C.MU * v_ego * v_ego
+
+    deriv = jnp.stack([dx_lead, dv_lead, dg_lead, dx_ego, dv_ego, dg_ego])
+    nxt = state + C.DT * deriv
+    return (
+        nxt.at[C.IDX_V_LEAD]
+        .set(jnp.maximum(nxt[C.IDX_V_LEAD], 0.0))
+        .at[C.IDX_V_EGO]
+        .set(jnp.maximum(nxt[C.IDX_V_EGO], 0.0))
+    )
+
+
+class _ConstantLeadOpenLoop(immrax.OpenLoopSystem):
+    def __init__(self) -> None:
+        super().__init__(evolution="discrete", xlen=C.STATE_DIM)
+
+    def f(self, t, x, u, w):  # noqa: ARG002
+        return _constant_lead_dynamics_step_jax(x, u)
+
+
 def verify_initial_box_invariants(
     controller: nn.Module,
     initial_lo: np.ndarray = C.INITIAL_LO,
     initial_hi: np.ndarray = C.INITIAL_HI,
     n_steps: int = C.N_STEPS,
+    plant: str = "default",
 ) -> dict[str, VerifierResult]:
+    """`plant`: 'default' = sigmoid-decel lead (ARCH-COMP); 'constant_lead' =
+    lead held at init v_lead (steady-follow regime)."""
     weights = _jax_weights_from_torch(controller)
     ctrl = _ACCController(weights)
-    plant = _ACCOpenLoop()
-    nncs = immrax.NNCSystem(plant, ctrl)  # pyright: ignore[reportArgumentType]
+    plant_obj: immrax.OpenLoopSystem
+    if plant == "default":
+        plant_obj = _ACCOpenLoop()
+    elif plant == "constant_lead":
+        plant_obj = _ConstantLeadOpenLoop()
+    else:
+        raise ValueError(f"unknown plant {plant!r}; pick from default | constant_lead")
+    nncs = immrax.NNCSystem(plant_obj, ctrl)  # pyright: ignore[reportArgumentType]
     emb = immrax.NNCEmbeddingSystem(nncs, nn_verifier="crown")
 
     init_ix = immrax.interval(jnp.asarray(initial_lo), jnp.asarray(initial_hi))
@@ -241,8 +288,9 @@ def verify_initial_box_safe(
     initial_lo: np.ndarray = C.INITIAL_LO,
     initial_hi: np.ndarray = C.INITIAL_HI,
     n_steps: int = C.N_STEPS,
+    plant: str = "default",
 ) -> VerifierResult:
     """Back-compat shim for the safety-only verifier."""
-    return verify_initial_box_invariants(controller, initial_lo, initial_hi, n_steps)[
-        "safe"
-    ]
+    return verify_initial_box_invariants(
+        controller, initial_lo, initial_hi, n_steps, plant=plant
+    )["safe"]

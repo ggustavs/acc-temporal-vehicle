@@ -21,25 +21,41 @@ from acc.analysis._data import (
     iVE,
     iXE,
     iXL,
+    lead_mode_for_box,
     load_arms,
     rollout,
     sample_box,
 )
 from acc.analysis._metrics import margins
 from acc.analysis._plotting import crown_vs_mc_panel, save_figure
-from acc.verifier import _ACCController, _ACCOpenLoop, _jax_weights_from_torch
+from acc.verifier import (
+    _ACCController,
+    _ACCOpenLoop,
+    _ConstantLeadOpenLoop,
+    _jax_weights_from_torch,
+)
 
 _N_MC = 4000
 
 
-def crown_bounds(net: nn.Module) -> tuple[np.ndarray, np.ndarray]:
-    """Per-step interval reachable set [lower, upper] over N_STEPS."""
+def crown_bounds(
+    net: nn.Module,
+    *,
+    init_lo: np.ndarray | None = None,
+    init_hi: np.ndarray | None = None,
+    plant: str = "default",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-step interval reachable set [lower, upper] over N_STEPS.
+    `plant`: 'default' = sigmoid-decel; 'constant_lead' = constant v_lead."""
+    lo = C.INITIAL_LO if init_lo is None else init_lo
+    hi = C.INITIAL_HI if init_hi is None else init_hi
     ctrl = _ACCController(_jax_weights_from_torch(net))
+    plant_obj = _ACCOpenLoop() if plant == "default" else _ConstantLeadOpenLoop()
     emb = immrax.NNCEmbeddingSystem(
-        immrax.NNCSystem(_ACCOpenLoop(), ctrl),  # pyright: ignore[reportArgumentType]
+        immrax.NNCSystem(plant_obj, ctrl),  # pyright: ignore[reportArgumentType]
         nn_verifier="crown",
     )
-    init_ix = immrax.interval(jnp.asarray(C.INITIAL_LO), jnp.asarray(C.INITIAL_HI))
+    init_ix = immrax.interval(jnp.asarray(lo), jnp.asarray(hi))
     n_corner = 1 + C.STATE_DIM + ctrl.out_len
     traj = emb.compute_trajectory(
         t0=0,
@@ -76,15 +92,29 @@ def _crown_margin_band(lo: np.ndarray, hi: np.ndarray) -> tuple[np.ndarray, np.n
     return crown_lo, crown_hi
 
 
-def formal_compute(arms: dict) -> dict[str, dict[str, np.ndarray]]:
-    """For each arm: CROWN safety-margin band + MC 5-95% / worst trace."""
-    x0 = sample_box(_N_MC, 1.0, SEED)
+def formal_compute(
+    arms: dict,
+    *,
+    init_box: str = "default",
+) -> dict[str, dict[str, np.ndarray]]:
+    """For each arm: CROWN safety-margin band + MC 5-95% / worst trace.
+    `init_box` selects bounds + matching plant/lead for both CROWN and MC."""
+    if init_box == "default":
+        init_lo, init_hi = C.INITIAL_LO, C.INITIAL_HI
+        plant = "default"
+    elif init_box == "finetune":
+        init_lo, init_hi = C.INITIAL_LO_FINETUNE, C.INITIAL_HI_FINETUNE
+        plant = "constant_lead"
+    else:
+        raise ValueError(f"unknown init_box {init_box!r}; pick default | finetune")
+    lead = lead_mode_for_box(init_box)
+    x0 = sample_box(_N_MC, 1.0, SEED, box=init_box)
     out: dict[str, dict[str, np.ndarray]] = {}
     for k, net in arms.items():
-        lo, hi = crown_bounds(net)
+        lo, hi = crown_bounds(net, init_lo=init_lo, init_hi=init_hi, plant=plant)
         crown_lo, crown_hi = _crown_margin_band(lo, hi)
         S = crown_lo.shape[0]
-        mc = margins(rollout(net, x0, "training").numpy())[:, :S]
+        mc = margins(rollout(net, x0, lead).numpy())[:, :S]
         out[k] = {
             "crown_lo": crown_lo,
             "crown_hi": crown_hi,
@@ -146,13 +176,14 @@ def formal_vs_empirical_core(
     arms_to_paths: dict[str, str],
     out_dir: Path,
     console: Optional[Console] = None,
+    init_box: str = "default",
 ) -> dict:
     console = console or Console()
     fig_dir = out_dir / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
 
     arms = load_arms(arms_to_paths)
-    data = formal_compute(arms)
+    data = formal_compute(arms, init_box=init_box)
     formal_render(data, fig_dir)
     summary = formal_summarise(data)
 

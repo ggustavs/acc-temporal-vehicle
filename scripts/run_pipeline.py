@@ -29,9 +29,10 @@ from acc.commands.train_sfo import train_sfo_loop
 from acc.commands.train_stl import train_stl_loop
 from acc.commands.tune_sfo import tune_sfo_core
 from acc.commands.tune_stl import tune_stl_core
+from acc.dynamics import constant_lead_dynamics_step
 
 _FINETUNE_LR = 1e-5
-_FINETUNE_EPOCHS = 5
+_FINETUNE_EPOCHS = 1
 
 
 class _Tee:
@@ -120,6 +121,7 @@ def _stage_plan(
             "warm_start_path": C.STL_CHECKPOINT_PATH,
             "init_lo": C.INITIAL_LO_FINETUNE,
             "init_hi": C.INITIAL_HI_FINETUNE,
+            "dynamics_fn": constant_lead_dynamics_step,
         }
         plan["finetune-sfo"] = {
             "spec_path": C.ACC_SFO_FINETUNE_SPEC_PATH,
@@ -129,6 +131,7 @@ def _stage_plan(
             "lr": _FINETUNE_LR,
             "pgd_num_steps": C.SFO_PGD_K,
             "history_path": C.RESULTS_DIR / "sfo_finetune_history.csv",
+            "dynamics_fn": constant_lead_dynamics_step,
             "warm_start_path": C.SFO_CHECKPOINT_PATH,
         }
     return plan

@@ -54,11 +54,24 @@ def _string_lead_a(mode: str, t: int, s: torch.Tensor) -> torch.Tensor:
     if mode == "training":
         # The sigmoid-decel lead profile the controllers were trained against.
         return C.A_LEAD_HARD * torch.sigmoid(C.K_LEAD * (vL - C.V_LEAD_RELEASE))
+    if mode == "constant":
+        # a_lead = 0; lead stays at its init v_lead (steady-follow regime).
+        return torch.zeros_like(vL)
     if mode == "delayed":
         return torch.full_like(vL, 0.0) if t < T // 2 else torch.full_like(vL, -3.0)
     if mode.startswith("a="):
         return torch.full_like(vL, float(mode.split("=")[1]))
     raise ValueError(f"unknown lead mode {mode!r}")
+
+
+def lead_mode_for_box(init_box: str) -> str:
+    """Pair an init box with the matching lead mode for the rollout dynamics.
+    'default' -> 'training' (sigmoid-decel); 'finetune' -> 'constant' (held at init v)."""
+    if init_box == "default":
+        return "training"
+    if init_box == "finetune":
+        return "constant"
+    raise ValueError(f"unknown init_box {init_box!r}; pick from default | finetune")
 
 
 def rollout(
@@ -89,11 +102,26 @@ def rollout(
         return torch.stack(traj, dim=1)
 
 
-def sample_box(n: int, factor: float, seed: int) -> torch.Tensor:
-    """Sample `n` initial states from the (centre +/- factor*half) box."""
+def sample_box(
+    n: int,
+    factor: float,
+    seed: int,
+    *,
+    box: str = "default",
+) -> torch.Tensor:
+    """Sample `n` initial states from the (centre +/- factor*half) box.
+    `box` picks which {lo, hi} pair: 'default' = INITIAL_LO/HI,
+    'finetune' = INITIAL_LO/HI_FINETUNE. `factor` scales the half-width
+    around the centre."""
+    if box == "default":
+        box_lo, box_hi = C.INITIAL_LO, C.INITIAL_HI
+    elif box == "finetune":
+        box_lo, box_hi = C.INITIAL_LO_FINETUNE, C.INITIAL_HI_FINETUNE
+    else:
+        raise ValueError(f"unknown box {box!r}; pick from default | finetune")
     rng = np.random.default_rng(seed)
-    centre = 0.5 * (C.INITIAL_LO + C.INITIAL_HI)
-    half = 0.5 * (C.INITIAL_HI - C.INITIAL_LO)
+    centre = 0.5 * (box_lo + box_hi)
+    half = 0.5 * (box_hi - box_lo)
     lo, hi = centre - factor * half, centre + factor * half
     pts = np.tile(centre, (n, 1))
     free = [iXL, iVL, iXE, iVE]

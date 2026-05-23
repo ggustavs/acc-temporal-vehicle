@@ -34,9 +34,10 @@ N_STEPS = 50
 INITIAL_LO = np.array([85.0, 32.0, 0.0, 10.0, 30.0, 0.0])
 INITIAL_HI = np.array([89.0, 32.2, 0.0, 11.0, 30.2, 0.0])
 
-# Must match initialLo/Hi in acc_safety_sfo_finetune.vcl.
-INITIAL_LO_FINETUNE = np.array([85.0, 22.0, 0.0, 10.0, 30.0, 0.0])
-INITIAL_HI_FINETUNE = np.array([89.0, 32.2, 0.0, 11.0, 30.2, 0.0])
+# Steady-follow finetune box. Must match initialLo/Hi in
+# acc_safety_sfo_finetune.vcl. Pairs with constant_lead_dynamics_step.
+INITIAL_LO_FINETUNE = np.array([85.0, 22.0, 0.0, 9.0, 29.0, 0.0])
+INITIAL_HI_FINETUNE = np.array([95.0, 28.0, 0.0, 11.0, 31.0, 0.0])
 
 ACT_LO = -3.0
 ACT_HI = 2.0

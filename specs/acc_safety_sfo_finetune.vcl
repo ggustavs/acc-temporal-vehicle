@@ -1,5 +1,5 @@
--- ACC SFO spec for fine-tune: same properties as acc_safety_sfo.vcl with
--- initialLo[1] widened from 32.0 to 22.0 (slow-cruise regime).
+-- Steady-follow fine-tune variant of acc_safety_sfo.vcl: same properties,
+-- narrower init box. Must match INITIAL_LO/HI_FINETUNE in constants.py.
 import STL
 
 -- QLL (Quantile Loss Logic): logsumexp-smoothed STL.
@@ -100,10 +100,10 @@ dynamics : Tensor Real [stateDim] -> Tensor Real [actDim]
         -> Tensor Real [stateDim]
 
 initialLo : Tensor Real [stateDim]
-initialLo = [85.0, 22.0, 0.0, 10.0, 30.0, 0.0]
+initialLo = [85.0, 22.0, 0.0, 9.0, 29.0, 0.0]
 
 initialHi : Tensor Real [stateDim]
-initialHi = [89.0, 32.2, 0.0, 11.0, 30.2, 0.0]
+initialHi = [95.0, 28.0, 0.0, 11.0, 31.0, 0.0]
 
 inInitialSet : Tensor Real [stateDim] -> Bool
 inInitialSet x = forall k . initialLo ! k <= x ! k <= initialHi ! k

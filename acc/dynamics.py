@@ -77,3 +77,47 @@ def acc_dynamics_step(
         _ACT_LO,
         _ACT_HI,
     )
+
+
+@torch.jit.script
+def _constant_lead_dynamics_step_impl(
+    state: Tensor,
+    action: Tensor,
+    dt: float,
+    tau: float,
+    mu: float,
+    act_lo: float,
+    act_hi: float,
+) -> Tensor:
+    # Lead held at init v_lead (a_lead = dg_lead = dv_lead = 0). Ego unchanged.
+    v_ego = state[..., 4]
+    g_ego = state[..., 5]
+    centre = 0.5 * (act_hi + act_lo)
+    half = 0.5 * (act_hi - act_lo)
+    a_ego = centre + half * torch.tanh((action[..., 0] - centre) / half)
+
+    v_lead = state[..., 1]
+    dx_lead = v_lead
+    dv_lead = torch.zeros_like(v_lead)
+    dg_lead = torch.zeros_like(v_lead)
+    dx_ego = v_ego
+    dv_ego = g_ego
+    dg_ego = (a_ego - g_ego) / tau - mu * v_ego * v_ego
+    deriv = torch.stack([dx_lead, dv_lead, dg_lead, dx_ego, dv_ego, dg_ego], dim=-1)
+    nxt = state + dt * deriv
+    v_lead_n = torch.clamp(nxt[..., 1], min=0.0)
+    v_ego_n = torch.clamp(nxt[..., 4], min=0.0)
+    return torch.stack(
+        [nxt[..., 0], v_lead_n, nxt[..., 2], nxt[..., 3], v_ego_n, nxt[..., 5]],
+        dim=-1,
+    )
+
+
+def constant_lead_dynamics_step(
+    state: Float[Tensor, "B 6"],
+    action: Float[Tensor, "B 1"],
+) -> Float[Tensor, "B 6"]:
+    """Lead held at its init v_lead (no sigmoid-decel); ego dynamics unchanged."""
+    return _constant_lead_dynamics_step_impl(
+        state, action, _DT, _TAU, _MU, _ACT_LO, _ACT_HI,
+    )

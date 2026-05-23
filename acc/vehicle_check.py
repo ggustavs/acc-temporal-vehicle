@@ -1,6 +1,6 @@
 """Thin wrappers around Vehicle's compiled property checks and `trajectory`."""
 
-from typing import Callable, Iterable, NamedTuple
+from typing import Any, Callable, Iterable, NamedTuple
 
 import torch
 from torch import Tensor, nn
@@ -16,12 +16,14 @@ class PropertyCheck(NamedTuple):
     loss: float
 
 
-def _make_check(decl: Callable) -> Callable[[nn.Module, Tensor], PropertyCheck]:
+def _make_check(
+    decl: Callable, dynamics_fn: Any
+) -> Callable[[nn.Module, Tensor], PropertyCheck]:
     def check(controller: nn.Module, x0: Tensor) -> PropertyCheck:
         with torch.no_grad():
             val = decl(
                 controller=controller,
-                dynamics=acc_dynamics_step,
+                dynamics=dynamics_fn,
                 initState=x0,
             )
         loss = float(val.item() if isinstance(val, torch.Tensor) else val)
@@ -33,12 +35,14 @@ def _make_check(decl: Callable) -> Callable[[nn.Module, Tensor], PropertyCheck]:
 def load_property_checks(
     declarations: dict[str, Callable],
     names: Iterable[str] = C.PROPERTY_NAMES,
+    dynamics_fn: Any = acc_dynamics_step,
 ) -> dict[str, Callable[[nn.Module, Tensor], PropertyCheck]]:
-    return {name: _make_check(declarations[name]) for name in names}
+    return {name: _make_check(declarations[name], dynamics_fn) for name in names}
 
 
 def load_trajectory(
     declarations: dict[str, Callable],
+    dynamics_fn: Any = acc_dynamics_step,
 ) -> Callable[[nn.Module, Tensor], Tensor]:
     trajectory_fn = declarations["trajectory"]
 
@@ -46,7 +50,7 @@ def load_trajectory(
         with torch.no_grad():
             return trajectory_fn(
                 controller=controller,
-                dynamics=acc_dynamics_step,
+                dynamics=dynamics_fn,
                 initState=x0,
             )
 

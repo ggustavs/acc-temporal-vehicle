@@ -18,8 +18,9 @@ def analyze_deep(
     out_dir: Optional[Path] = typer.Option(
         None,
         "--out-dir",
-        help="Output directory. Defaults to results/deep_eval for nominal, "
-        "results/deep_eval/acc_sweep for acc-sweep.",
+        help="Output directory. Defaults to results/deep_eval (default box), "
+        "results/deep_eval_finetune (finetune box), or appending /acc_sweep "
+        "for the operating-point grid.",
     ),
     checkpoint: Optional[list[str]] = typer.Option(
         None,
@@ -31,11 +32,19 @@ def analyze_deep(
         "--init-mode",
         help="nominal = ARCH-COMP box; acc-sweep = 45-cell ACC operating-point grid.",
     ),
+    init_box: str = typer.Option(
+        "default",
+        "--init-box",
+        help="default = INITIAL_LO/HI; finetune = INITIAL_LO/HI_FINETUNE. "
+        "Affects the sampled-init analyses (envelopes, pareto, factor_stress, "
+        "adversarial, vehicle_robustness); acc_scenarios is unaffected.",
+    ),
 ) -> None:
     """Behaviour envelopes + figures + per-property robustness across arms."""
     arms = parse_checkpoint_kvs(checkpoint or [], default_arms())
     if out_dir is None:
-        out_dir = C.RESULTS_DIR / "deep_eval"
+        base = "deep_eval" if init_box == "default" else f"deep_eval_{init_box}"
+        out_dir = C.RESULTS_DIR / base
         if init_mode == "acc-sweep":
             out_dir = out_dir / "acc_sweep"
-    deep_eval_core(arms, out_dir, init_mode=init_mode)
+    deep_eval_core(arms, out_dir, init_mode=init_mode, init_box=init_box)

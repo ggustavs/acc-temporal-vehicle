@@ -23,6 +23,7 @@ from acc.analysis._data import (
     iVL,
     iXE,
     iXL,
+    lead_mode_for_box,
     load_arms,
     rollout,
     sample_box,
@@ -52,9 +53,12 @@ N = 4000
 FACTOR_VALUES: tuple[float, ...] = (1.0, 1.5, 2.0)
 
 
-def envelopes_compute(arms: dict) -> dict[str, np.ndarray]:
-    x0 = sample_box(N, 1.0, SEED)
-    return {k: rollout(v, x0, "training").numpy() for k, v in arms.items()}
+def envelopes_compute(
+    arms: dict, *, init_box: str = "default"
+) -> dict[str, np.ndarray]:
+    x0 = sample_box(N, 1.0, SEED, box=init_box)
+    lead = lead_mode_for_box(init_box)
+    return {k: rollout(v, x0, lead).numpy() for k, v in arms.items()}
 
 
 _ENVELOPE_PANELS = [
@@ -91,11 +95,14 @@ def envelopes_summarise(trajs: dict[str, np.ndarray]) -> dict:
     }
 
 
-def pareto_compute(arms: dict) -> dict[str, np.ndarray]:
+def pareto_compute(
+    arms: dict, *, init_box: str = "default"
+) -> dict[str, np.ndarray]:
     # Same rollouts as envelopes; recompute here so the analysis is
     # self-contained (cheap: 4000 inits, ~1 s per arm).
-    x0 = sample_box(N, 1.0, SEED)
-    return {k: rollout(v, x0, "training").numpy() for k, v in arms.items()}
+    x0 = sample_box(N, 1.0, SEED, box=init_box)
+    lead = lead_mode_for_box(init_box)
+    return {k: rollout(v, x0, lead).numpy() for k, v in arms.items()}
 
 
 def pareto_render(trajs: dict[str, np.ndarray], fig_dir: Path) -> None:
@@ -124,10 +131,15 @@ def pareto_summarise(trajs: dict[str, np.ndarray]) -> dict:
     }
 
 
-def factor_stress_compute(arms: dict) -> dict[float, dict[str, np.ndarray]]:
+def factor_stress_compute(
+    arms: dict, *, init_box: str = "default"
+) -> dict[float, dict[str, np.ndarray]]:
+    lead = lead_mode_for_box(init_box)
     return {
         f: {
-            k: rollout(v, sample_box(N, f, SEED + int(f * 10)), "training").numpy()
+            k: rollout(
+                v, sample_box(N, f, SEED + int(f * 10), box=init_box), lead
+            ).numpy()
             for k, v in arms.items()
         }
         for f in FACTOR_VALUES
@@ -168,11 +180,16 @@ _ADV_N = 512
 _ADV_LR = 0.10
 
 
-def adversarial_compute(arms: dict) -> dict:
+def adversarial_compute(arms: dict, *, init_box: str = "default") -> dict:
     free = [0, 1, 3, 4]  # x_lead, v_lead, x_ego, v_ego (free state dims)
-    lo = torch.tensor(C.INITIAL_LO, dtype=torch.float32)
-    hi = torch.tensor(C.INITIAL_HI, dtype=torch.float32)
-    base = sample_box(_ADV_N, 1.0, SEED + 7)
+    if init_box == "finetune":
+        box_lo, box_hi = C.INITIAL_LO_FINETUNE, C.INITIAL_HI_FINETUNE
+    else:
+        box_lo, box_hi = C.INITIAL_LO, C.INITIAL_HI
+    lead = lead_mode_for_box(init_box)
+    lo = torch.tensor(box_lo, dtype=torch.float32)
+    hi = torch.tensor(box_hi, dtype=torch.float32)
+    base = sample_box(_ADV_N, 1.0, SEED + 7, box=init_box)
     sweep: dict[str, list[float]] = {}
     worst_trajs: dict[str, np.ndarray] = {}
     for k, net in arms.items():
@@ -184,7 +201,7 @@ def adversarial_compute(arms: dict) -> dict:
             x = base.clone()
             x.requires_grad_(True)
             for _ in range(steps):
-                mm = margins_t(rollout(net, x, "training", grad=True))
+                mm = margins_t(rollout(net, x, lead, grad=True))
                 loss = mm.min(1).values.sum()
                 (g,) = torch.autograd.grad(loss, x)
                 with torch.no_grad():
@@ -194,13 +211,13 @@ def adversarial_compute(arms: dict) -> dict:
                     x[:, free] = torch.clamp(x[:, free], lo[free], hi[free])
                 x.requires_grad_(True)
             with torch.no_grad():
-                mmin = margins(rollout(net, x.detach(), "training").numpy()).min(1)
+                mmin = margins(rollout(net, x.detach(), lead).numpy()).min(1)
             curve.append(float(mmin.min()))
             if steps == _ADV_PGD_STEPS[-1]:
                 wi = int(mmin.argmin())
                 worst_init = x.detach()[wi : wi + 1]
         sweep[k] = curve
-        worst_trajs[k] = rollout(net, worst_init, "training").numpy()[0]
+        worst_trajs[k] = rollout(net, worst_init, lead).numpy()[0]
     return {"sweep": sweep, "worst_trajs": worst_trajs}
 
 
@@ -260,7 +277,9 @@ def adversarial_summarise(data: dict) -> dict:
 _VR_N = 192
 
 
-def vehicle_robustness_compute(arms: dict) -> dict[str, dict[str, np.ndarray]]:
+def vehicle_robustness_compute(
+    arms: dict, *, init_box: str = "default"
+) -> dict[str, dict[str, np.ndarray]]:
     # Import lazily; pulls in Vehicle's Python bindings + spec compile.
     from acc._vlang import load_specification
     from acc.vehicle_check import load_property_checks
@@ -271,7 +290,7 @@ def vehicle_robustness_compute(arms: dict) -> dict[str, dict[str, np.ndarray]]:
         declarations=(*C.PROPERTY_NAMES, "trajectory"),
     )
     checks = load_property_checks(decls)
-    sub = sample_box(_VR_N, 1.0, SEED + 3)
+    sub = sample_box(_VR_N, 1.0, SEED + 3, box=init_box)
     out: dict[str, dict[str, np.ndarray]] = {}
     for prop in C.PROPERTY_NAMES:
         out[prop] = {}
@@ -314,12 +333,14 @@ def vehicle_robustness_summarise(
 
 _ACC_SCENARIOS: dict[str, dict[str, Any]] = {
     "steady_follow_v22": {
+        # 25 m slack; 15 m is below the comfort-bounded ACC feasibility floor.
         "desc": "v_set=30, lead settles to 22 m/s -- gap regulation under a slower lead",
         "v_set": 30.0,
         "v_ego0": 30.0,
         "v_lead0": 22.0,
         "lead_fn": lead_constant_v(22.0),
         "release_step": 0,
+        "init_slack": 25.0,
     },
     "steady_follow_v25": {
         "desc": "v_set=30, lead settles to 25 m/s -- moderate-slower lead",
@@ -356,12 +377,15 @@ _ACC_SCENARIOS: dict[str, dict[str, Any]] = {
 }
 
 
-def acc_scenarios_compute(arms: dict) -> dict[str, dict[str, Any]]:
+def acc_scenarios_compute(
+    arms: dict, *, init_box: str = "default"  # noqa: ARG001 -- scenes are box-agnostic
+) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for name, sc in _ACC_SCENARIOS.items():
         d_safe0 = C.D_DEFAULT + C.T_GAP * max(sc["v_ego0"], 0.0)
         x_ego0 = 0.0
-        x_lead0 = x_ego0 + d_safe0 + 15.0  # 15 m slack above dSafe
+        slack = float(sc.get("init_slack", 15.0))
+        x_lead0 = x_ego0 + d_safe0 + slack
         x0 = torch.tensor(
             [[x_lead0, sc["v_lead0"], 0.0, x_ego0, sc["v_ego0"], 0.0]],
             dtype=torch.float32,
@@ -516,6 +540,7 @@ def deep_eval_core(
     out_dir: Path,
     console: Optional[Console] = None,
     init_mode: str = "nominal",
+    init_box: str = "default",
 ) -> dict:
     if init_mode == "acc-sweep":
         from acc.analysis._acc_sweep import deep_eval_acc_sweep
@@ -530,10 +555,13 @@ def deep_eval_core(
     torch.manual_seed(SEED)
 
     arms = load_arms(arms_to_paths)
-    metrics: dict = {"N": N, "seed": SEED, "factors": list(FACTOR_VALUES)}
+    metrics: dict = {
+        "N": N, "seed": SEED, "factors": list(FACTOR_VALUES),
+        "init_box": init_box,
+    }
 
     for name, (compute, render, summarise) in ANALYSES.items():
-        data = compute(arms)
+        data = compute(arms, init_box=init_box)
         render(data, fig_dir)
         metrics[name] = summarise(data)
 

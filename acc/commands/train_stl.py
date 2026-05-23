@@ -1,7 +1,7 @@
 """Train the controller against the Vehicle STL property loss (per-property GradNorm)."""
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import torch
@@ -14,7 +14,7 @@ from acc import constants as C
 from acc._vlang import load_specification
 from acc.cli import train_app
 from acc.controller import fresh_controller, load_checkpoint
-from acc.dynamics import acc_dynamics_step
+from acc.dynamics import acc_dynamics_step, constant_lead_dynamics_step
 from acc.gradnorm import GuardedGradNormBalancer as GradNormBalancer
 from acc.initial_set import sample_uniform, sample_uniform_box
 from acc.io import dump_stl_history_csv
@@ -36,6 +36,7 @@ def train_stl_loop(
     warm_start_path: Optional[Path] = None,
     init_lo: Optional[np.ndarray] = None,
     init_hi: Optional[np.ndarray] = None,
+    dynamics_fn: Any = acc_dynamics_step,
 ) -> float:
     """`report_cb(epoch, mean_stl) -> True` aborts early."""
     console = console or Console()
@@ -70,7 +71,7 @@ def train_stl_loop(
                         _sat(
                             fn(
                                 controller=net,
-                                dynamics=acc_dynamics_step,
+                                dynamics=dynamics_fn,
                                 initState=x0,
                             )
                         )
@@ -153,9 +154,11 @@ def train_stl(
     if init_mode == "finetune":
         init_lo: Optional[np.ndarray] = C.INITIAL_LO_FINETUNE
         init_hi: Optional[np.ndarray] = C.INITIAL_HI_FINETUNE
+        dynamics_fn: Any = constant_lead_dynamics_step
     elif init_mode == "default":
         init_lo = None
         init_hi = None
+        dynamics_fn = acc_dynamics_step
     else:
         raise typer.BadParameter(
             f"unknown --init-mode {init_mode!r}; pick from default | finetune"
@@ -172,4 +175,5 @@ def train_stl(
         warm_start_path=warm_start_path,
         init_lo=init_lo,
         init_hi=init_hi,
+        dynamics_fn=dynamics_fn,
     )
